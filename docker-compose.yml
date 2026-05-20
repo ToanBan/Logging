@@ -1,0 +1,109 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: logging-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: logging_benchmark
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/dump-chat-202605181224.sql:/dump.dump
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d logging_benchmark"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  fastify-service:
+    build:
+      context: ./service/fastify-service
+      dockerfile: Dockerfile
+    container_name: fastify-service
+    environment:
+      PORT: "3001"
+      LOG_MODE: ${LOG_MODE:-none}
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/logging_benchmark
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  elysia-service:
+    build:
+      context: ./service/elysia-service
+      dockerfile: Dockerfile
+    container_name: elysia-service
+    environment:
+      PORT: "3002"
+      LOG_MODE: ${LOG_MODE:-none}
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/logging_benchmark
+    ports:
+      - "3002:3002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  gin-service:
+    build:
+      context: ./service/gin-service
+      dockerfile: Dockerfile
+    container_name: gin-service
+    environment:
+      PORT: "3003"
+      LOG_MODE: ${LOG_MODE:-none}
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/logging_benchmark
+    ports:
+      - "3003:3003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  fiber-service:
+    build:
+      context: ./service/fiber-service
+      dockerfile: Dockerfile
+    container_name: fiber-service
+    environment:
+      PORT: "3004"
+      LOG_MODE: ${LOG_MODE:-none}
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/logging_benchmark
+    ports:
+      - "3004:3004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  fastapi-service:
+    build:
+      context: ./service/fastapi-service
+      dockerfile: Dockerfile
+    container_name: fastapi-service
+    environment:
+      LOG_MODE: ${LOG_MODE:-none}
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/logging_benchmark
+    ports:
+      - "3005:3005"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  django-service:
+    build:
+      context: ./service/django-service
+      dockerfile: Dockerfile
+    container_name: django-service
+    environment:
+      LOG_MODE: ${LOG_MODE:-none}
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/logging_benchmark
+    ports:
+      - "3006:3006"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
