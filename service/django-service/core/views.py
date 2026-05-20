@@ -1,5 +1,8 @@
 import os
+import math
+import uuid
 import contextlib
+import time
 import structlog
 from django.http import JsonResponse
 import psycopg2
@@ -51,6 +54,9 @@ def health(request):
 
 
 def get_messages(request):
+    # ⏱️ BẮT ĐẦU ĐO
+    t_start = time.perf_counter()
+
     try:
         page = max(1, int(request.GET.get("page", 1)))
     except ValueError:
@@ -67,6 +73,9 @@ def get_messages(request):
 
     offset = (page - 1) * limit
 
+    # ⏱️ CHẶNG 1: Xong bước parse param và chạy logger request
+    t_param_done = time.perf_counter()
+
     try:
         with get_db_cursor() as cur:
             cur.execute(
@@ -80,6 +89,17 @@ def get_messages(request):
                 msg["created_at"] = msg["created_at"].isoformat()
             if msg.get("updated_at"):
                 msg["updated_at"] = msg["updated_at"].isoformat()
+
+        # ⏱️ CHẶNG 2: Database trả kết quả và format xong dữ liệu
+        t_db_done = time.perf_counter()
+
+        # Tính toán thời gian phân đoạn (Quy đổi sang mili-giây)
+        p_params = (t_param_done - t_start) * 1000
+        p_db = (t_db_done - t_param_done) * 1000
+        p_total = (time.perf_counter() - t_start) * 1000
+
+        # In kết quả đo đạc ra terminal
+        print(f"[DJANGO_PERF_GET_ALL] Mode: {LOG_MODE.upper()} | ParseParam: {p_params:.3f}ms | DB_Query: {p_db:.3f}ms | Total: {p_total:.3f}ms", flush=True)
 
         return JsonResponse({
             "success": True,
@@ -97,6 +117,9 @@ def get_messages(request):
 
 
 def get_messages_by_room(request, room_origin_id):
+    # ⏱️ BẮT ĐẦU ĐO
+    t_start = time.perf_counter()
+
     if LOG_MODE == "structured":
         logger.info("get_messages_by_room_request", room_origin_id=room_origin_id)
 
@@ -113,6 +136,9 @@ def get_messages_by_room(request, room_origin_id):
 
     offset = (page - 1) * limit
 
+    # ⏱️ CHẶNG 1: Xong bước parse param và logger request
+    t_param_done = time.perf_counter()
+
     try:
         with get_db_cursor() as cur:
             cur.execute(
@@ -121,9 +147,18 @@ def get_messages_by_room(request, room_origin_id):
             )
             messages = cur.fetchall()
 
+        # Tính toán thời gian phân đoạn trước đề phòng rẽ nhánh 404
+        p_params = (t_param_done - t_start) * 1000
+        p_db = (time.perf_counter() - t_param_done) * 1000
+
         if not messages:
             if LOG_MODE in ("structured", "selective"):
                 logger.warning("get_messages_by_room_not_found", room_origin_id=room_origin_id)
+            
+            p_total = (time.perf_counter() - t_start) * 1000
+            # Log lỗi 404 cho Django
+            print(f"[DJANGO_PERF_BY_ROOM_404] Mode: {LOG_MODE.upper()} | Room: {room_origin_id} | ParseParam: {p_params:.3f}ms | DB_Query: {p_db:.3f}ms | Total: {p_total:.3f}ms", flush=True)
+
             return JsonResponse(
                 {"success": False, "error": f"No messages found for room {room_origin_id}"},
                 status=404
@@ -134,6 +169,14 @@ def get_messages_by_room(request, room_origin_id):
                 message["created_at"] = message["created_at"].isoformat()
             if message.get("updated_at"):
                 message["updated_at"] = message["updated_at"].isoformat()
+
+        # ⏱️ CHẶNG 2 (Thành công): Đo mốc hoàn thành thực tế của DB và vòng lặp
+        t_db_done = time.perf_counter()
+        p_db = (t_db_done - t_param_done) * 1000
+        p_total = (time.perf_counter() - t_start) * 1000
+
+        # Log thành công 200 cho Django
+        print(f"[DJANGO_PERF_BY_ROOM_200] Mode: {LOG_MODE.upper()} | Room: {room_origin_id} | ParseParam: {p_params:.3f}ms | DB_Query: {p_db:.3f}ms | Total: {p_total:.3f}ms", flush=True)
 
         return JsonResponse({
             "success": True,

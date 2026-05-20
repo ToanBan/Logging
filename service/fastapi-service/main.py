@@ -2,6 +2,7 @@ import os
 import math
 import uuid
 import contextlib
+import time
 import structlog
 from fastapi import FastAPI, Request, Response, status, Query
 from fastapi.responses import JSONResponse
@@ -68,7 +69,7 @@ def get_db_cursor():
 class LoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if LOG_MODE == "none":
-            return await call_next(request)  # ← bỏ qua hết, không làm gì
+            return await call_next(request)
 
         req_id = request.headers.get("x-request-id", str(uuid.uuid4()))
         structlog.contextvars.clear_contextvars()
@@ -105,10 +106,16 @@ def get_messages(
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=100)
 ):
+    # ⏱️ BẮT ĐẦU ĐO
+    t_start = time.perf_counter()
+
     if LOG_MODE == "structured":
         logger.info("get_messages_request", page=page, limit=limit)
 
     offset = (page - 1) * limit
+
+    # ⏱️ CHẶNG 1: Xong bước tính toán tham số
+    t_param_done = time.perf_counter()
 
     try:
         with get_db_cursor() as cur:
@@ -123,6 +130,17 @@ def get_messages(
                 msg["created_at"] = msg["created_at"].isoformat()
             if msg.get("updated_at"):
                 msg["updated_at"] = msg["updated_at"].isoformat()
+
+        # ⏱️ CHẶNG 2: Database trả kết quả và format xong dữ liệu
+        t_db_done = time.perf_counter()
+
+        # Tính toán thời gian phân đoạn (Quy đổi từ giây sang mili-giây)
+        p_params = (t_param_done - t_start) * 1000
+        p_db = (t_db_done - t_param_done) * 1000
+        p_total = (time.perf_counter() - t_start) * 1000
+
+        # In kết quả đo đạc ra console
+        print(f"[FASTAPI_PERF_GET_ALL] Mode: {LOG_MODE.upper()} | ParseParam: {p_params:.3f}ms | DB_Query: {p_db:.3f}ms | Total: {p_total:.3f}ms", flush=True)
 
         return {
             "success": True,
@@ -143,10 +161,16 @@ def get_messages_by_room(
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=100)
 ):
+    # ⏱️ BẮT ĐẦU ĐO
+    t_start = time.perf_counter()
+
     if LOG_MODE == "structured":
         logger.info("get_messages_by_room_request", room_origin_id=room_origin_id)
 
     offset = (page - 1) * limit
+
+    # ⏱️ CHẶNG 1: Xong bước tính toán tham số
+    t_param_done = time.perf_counter()
 
     try:
         with get_db_cursor() as cur:
@@ -156,9 +180,18 @@ def get_messages_by_room(
             )
             messages = cur.fetchall()
 
+        # Tính toán thời gian phân đoạn trước phòng hờ rẽ nhánh
+        p_params = (t_param_done - t_start) * 1000
+        p_db = (time.perf_counter() - t_param_done) * 1000
+
         if not messages:
             if LOG_MODE in ("structured", "selective"):
                 logger.warning("get_messages_by_room_not_found", room_origin_id=room_origin_id)
+            
+            p_total = (time.perf_counter() - t_start) * 1000
+            # Log lỗi 404 cho FastAPI
+            print(f"[FASTAPI_PERF_BY_ROOM_404] Mode: {LOG_MODE.upper()} | Room: {room_origin_id} | ParseParam: {p_params:.3f}ms | DB_Query: {p_db:.3f}ms | Total: {p_total:.3f}ms", flush=True)
+
             return JSONResponse(
                 status_code=status.HTTP_404_NOT_FOUND,
                 content={"success": False, "error": f"No messages found for room {room_origin_id}"}
@@ -169,6 +202,14 @@ def get_messages_by_room(
                 message["created_at"] = message["created_at"].isoformat()
             if message.get("updated_at"):
                 message["updated_at"] = message["updated_at"].isoformat()
+
+        # ⏱️ CHẶNG 2 (Thành công): Cập nhật lại mốc kết thúc DB thực tế sau khi loop format xong
+        t_db_done = time.perf_counter()
+        p_db = (t_db_done - t_param_done) * 1000
+        p_total = (time.perf_counter() - t_start) * 1000
+
+        # Log thành công 200 cho FastAPI
+        print(f"[FASTAPI_PERF_BY_ROOM_200] Mode: {LOG_MODE.upper()} | Room: {room_origin_id} | ParseParam: {p_params:.3f}ms | DB_Query: {p_db:.3f}ms | Total: {p_total:.3f}ms", flush=True)
 
         return {
             "success": True,

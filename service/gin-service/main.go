@@ -137,14 +137,11 @@ func scanRowsToMaps(rows pgx.Rows) ([]map[string]interface{}, error) {
 		for i, col := range columns {
 			val := values[i]
 			if val != nil {
-				// Convert bigint columns to strings to match node-postgres (Fastify) behavior
 				if col == "id" || col == "room_id_id" || col == "website_room_id_id" {
 					rowMap[col] = fmt.Sprintf("%v", val)
 				} else if t, ok := val.(time.Time); ok {
-					// Format timestamps as ISO 8601 UTC string (matching JS Date's toISOString())
 					rowMap[col] = t.UTC().Format("2006-01-02T15:04:05.000Z")
 				} else if bytesVal, ok := val.([]byte); ok {
-					// Parse jsonb fields into JSON objects instead of leaving them as raw []byte (base64 string)
 					var jsonVal interface{}
 					if err := json.Unmarshal(bytesVal, &jsonVal); err == nil {
 						rowMap[col] = jsonVal
@@ -164,6 +161,9 @@ func scanRowsToMaps(rows pgx.Rows) ([]map[string]interface{}, error) {
 }
 
 func getMessages(c *gin.Context) {
+	// ⏱️ BẮT ĐẦU ĐO
+	tStart := time.Now()
+
 	reqLog := getLogger(c)
 	pageStr := c.DefaultQuery("page", "1")
 	limitStr := c.DefaultQuery("limit", "10")
@@ -185,6 +185,9 @@ func getMessages(c *gin.Context) {
 		limit = 100
 	}
 	offset := (page - 1) * limit
+
+	// ⏱️ CHẶNG 1: Xong bước tính toán tham số
+	tParamDone := time.Now()
 
 	dataQuery := "SELECT * FROM chat_message ORDER BY created_at DESC LIMIT $1 OFFSET $2"
 	dataArgs := []interface{}{limit, offset}
@@ -212,6 +215,17 @@ func getMessages(c *gin.Context) {
 		return
 	}
 
+	// ⏱️ CHẶNG 2: Database trả kết quả và Scan xong hoàn toàn
+	tDbDone := time.Now()
+
+	// Tính toán thời gian phân đoạn (Chuyển sang dạng mili-giây dạng số thực)
+	pParams := float64(tParamDone.Sub(tStart).Nanoseconds()) / 1e6
+	pDb := float64(tDbDone.Sub(tParamDone).Nanoseconds()) / 1e6
+	pTotal := float64(time.Since(tStart).Nanoseconds()) / 1e6
+
+	// In kết quả đo đạc ra console giống 2 thằng trước
+	fmt.Printf("[GIN_PERF_GET_ALL] Mode: %s | ParseParam: %.3fms | DB_Query: %.3fms | Total: %.3fms\n", strings.ToUpper(logMode), pParams, pDb, pTotal)
+
 	c.JSON(http.StatusOK, gin.H{
 		"success":    true,
 		"pagination": gin.H{"page": page, "limit": limit},
@@ -220,6 +234,9 @@ func getMessages(c *gin.Context) {
 }
 
 func getMessagesByRoom(c *gin.Context) {
+	// ⏱️ BẮT ĐẦU ĐO
+	tStart := time.Now()
+
 	reqLog := getLogger(c)
 	roomOriginID := c.Param("room_origin_id")
 
@@ -242,6 +259,9 @@ func getMessagesByRoom(c *gin.Context) {
 		limit = 100
 	}
 	offset := (page - 1) * limit
+
+	// ⏱️ CHẶNG 1: Xong bước tính toán tham số
+	tParamDone := time.Now()
 
 	rows, err := dbPool.Query(c.Request.Context(), "SELECT * FROM chat_message WHERE room_origin_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3", roomOriginID, limit, offset)
 	if err != nil {
@@ -266,16 +286,31 @@ func getMessagesByRoom(c *gin.Context) {
 		return
 	}
 
+	// ⏱️ CHẶNG 2: Database và Scan hoàn tất
+	tDbDone := time.Now()
+
+	pParams := float64(tParamDone.Sub(tStart).Nanoseconds()) / 1e6
+	pDb := float64(tDbDone.Sub(tParamDone).Nanoseconds()) / 1e6
+
 	if len(messages) == 0 {
 		if logMode == "structured" || logMode == "selective" {
 			reqLog.Warn().Str("event", "get_messages_by_room_not_found").Str("room_origin_id", roomOriginID).Msg("")
 		}
+		
+		pTotal := float64(time.Since(tStart).Nanoseconds()) / 1e6
+		// Log lỗi 404 cho Gin
+		fmt.Printf("[GIN_PERF_BY_ROOM_404] Mode: %s | Room: %s | ParseParam: %.3fms | DB_Query: %.3fms | Total: %.3fms\n", strings.ToUpper(logMode), roomOriginID, pParams, pDb, pTotal)
+
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
 			"error":   fmt.Sprintf("No messages found for room %s", roomOriginID),
 		})
 		return
 	}
+
+	pTotal := float64(time.Since(tStart).Nanoseconds()) / 1e6
+	// Log thành công 200 cho Gin
+	fmt.Printf("[GIN_PERF_BY_ROOM_200] Mode: %s | Room: %s | ParseParam: %.3fms | DB_Query: %.3fms | Total: %.3fms\n", strings.ToUpper(logMode), roomOriginID, pParams, pDb, pTotal)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success":    true,
