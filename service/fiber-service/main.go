@@ -166,12 +166,11 @@ func getMessages(c *fiber.Ctx) error {
 	reqLog := getLogger(c)
 	pageStr := c.Query("page", "1")
 	limitStr := c.Query("limit", "10")
-	roomOriginID := c.Query("room_origin_id")
 
 	// LOG_MODE switch
 	if logMode == "structured" {
 		reqLog.Info().Str("event", "get_messages_request").
-			Str("page", pageStr).Str("limit", limitStr).Str("room_origin_id", roomOriginID).Msg("")
+			Str("page", pageStr).Str("limit", limitStr).Msg("")
 	}
 
 	page, err := strconv.Atoi(pageStr)

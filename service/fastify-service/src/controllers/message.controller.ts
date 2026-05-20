@@ -6,7 +6,6 @@ const LOG_MODE = (process.env.LOG_MODE || "none").trim().toLowerCase();
 interface GetMessagesQuery {
   page?: string;
   limit?: string;
-  room_origin_id?: string;
 }
 
 interface GetMessagesByRoomQuery {
@@ -29,25 +28,13 @@ export const getMessages = async (
   const page = Math.max(1, parseInt(req.query.page || "1", 10));
   const limit = Math.max(1, Math.min(100, parseInt(req.query.limit || "10", 10)));
   const offset = (page - 1) * limit;
-  const roomOriginId = req.query.room_origin_id;
 
   try {
-    let rows
-
-    if (roomOriginId) {
-      rows = await sql`
-        SELECT * FROM chat_message
-        WHERE room_origin_id = ${roomOriginId}
-        ORDER BY created_at DESC
-        LIMIT ${limit} OFFSET ${offset}
-      `
-    } else {
-      rows = await sql`
-        SELECT * FROM chat_message
-        ORDER BY created_at DESC
-        LIMIT ${limit} OFFSET ${offset}
-      `
-    }
+    const rows = await sql`
+      SELECT * FROM chat_message
+      ORDER BY created_at DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `
 
     return {
       success: true,

@@ -103,26 +103,19 @@ def health():
 @app.get("/messages")
 def get_messages(
     page: int = Query(1, ge=1),
-    limit: int = Query(10, ge=1, le=100),
-    room_origin_id: str = Query(None)
+    limit: int = Query(10, ge=1, le=100)
 ):
     if LOG_MODE == "structured":
-        logger.info("get_messages_request", page=page, limit=limit, room_origin_id=room_origin_id)
+        logger.info("get_messages_request", page=page, limit=limit)
 
     offset = (page - 1) * limit
 
     try:
         with get_db_cursor() as cur:
-            if room_origin_id:
-                cur.execute(
-                    "SELECT * FROM chat_message WHERE room_origin_id = %s ORDER BY created_at DESC LIMIT %s OFFSET %s",
-                    (room_origin_id, limit, offset)
-                )
-            else:
-                cur.execute(
-                    "SELECT * FROM chat_message ORDER BY created_at DESC LIMIT %s OFFSET %s",
-                    (limit, offset)
-                )
+            cur.execute(
+                "SELECT * FROM chat_message ORDER BY created_at DESC LIMIT %s OFFSET %s",
+                (limit, offset)
+            )
             messages = cur.fetchall()
 
         for msg in messages:

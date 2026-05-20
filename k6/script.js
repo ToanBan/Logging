@@ -5,7 +5,7 @@ import { vu } from "k6/execution";
 
 const durationAllMessages = new Trend("duration_all_messages", true);
 const durationRoomMessages = new Trend("duration_room_messages", true);
-const BASE_URL = "http://localhost:3005";
+const BASE_URL = "http://localhost:3002";
 export const options = {
   scenarios: {
     logging_benchmark: {

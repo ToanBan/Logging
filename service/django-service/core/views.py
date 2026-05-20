@@ -62,8 +62,6 @@ def get_messages(request):
     except ValueError:
         limit = 10
 
-    room_origin_id = request.GET.get("room_origin_id", None)
-
     if LOG_MODE == "structured":
         logger.info("get_messages_request", page=page, limit=limit)
 
@@ -71,16 +69,10 @@ def get_messages(request):
 
     try:
         with get_db_cursor() as cur:
-            if room_origin_id:
-                cur.execute(
-                    "SELECT * FROM chat_message WHERE room_origin_id = %s ORDER BY created_at DESC LIMIT %s OFFSET %s",
-                    (room_origin_id, limit, offset)
-                )
-            else:
-                cur.execute(
-                    "SELECT * FROM chat_message ORDER BY created_at DESC LIMIT %s OFFSET %s",
-                    (limit, offset)
-                )
+            cur.execute(
+                "SELECT * FROM chat_message ORDER BY created_at DESC LIMIT %s OFFSET %s",
+                (limit, offset)
+            )
             messages = cur.fetchall()
 
         for msg in messages:

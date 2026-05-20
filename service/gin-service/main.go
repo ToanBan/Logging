@@ -167,11 +167,10 @@ func getMessages(c *gin.Context) {
 	reqLog := getLogger(c)
 	pageStr := c.DefaultQuery("page", "1")
 	limitStr := c.DefaultQuery("limit", "10")
-	roomOriginID := c.Query("room_origin_id")
 
 	if logMode == "structured" {
 		reqLog.Info().Str("event", "get_messages_request").
-			Str("page", pageStr).Str("limit", limitStr).Str("room_origin_id", roomOriginID).Msg("")
+			Str("page", pageStr).Str("limit", limitStr).Msg("")
 	}
 
 	page, err := strconv.Atoi(pageStr)
@@ -187,16 +186,8 @@ func getMessages(c *gin.Context) {
 	}
 	offset := (page - 1) * limit
 
-	var dataQuery string
-	var dataArgs []interface{}
-
-	if roomOriginID != "" {
-		dataQuery = "SELECT * FROM chat_message WHERE room_origin_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3"
-		dataArgs = []interface{}{roomOriginID, limit, offset}
-	} else {
-		dataQuery = "SELECT * FROM chat_message ORDER BY created_at DESC LIMIT $1 OFFSET $2"
-		dataArgs = []interface{}{limit, offset}
-	}
+	dataQuery := "SELECT * FROM chat_message ORDER BY created_at DESC LIMIT $1 OFFSET $2"
+	dataArgs := []interface{}{limit, offset}
 
 	rows, err := dbPool.Query(c.Request.Context(), dataQuery, dataArgs...)
 	if err != nil {
