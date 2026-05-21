@@ -41,12 +41,11 @@ export const getMessages = async (
     `;
 
     const tDbDone = performance.now();
-
     const pParams = tParamDone - tStart;
     const pDb = tDbDone - tParamDone;
     const pTotal = performance.now() - tStart;
-
-    console.log(`[PERF_GET_ALL] Mode: ${LOG_MODE.toUpperCase()} | ParseParam: ${pParams.toFixed(3)}ms | DB_Query: ${pDb.toFixed(3)}ms | Total: ${pTotal.toFixed(3)}ms`);
+    req.log.info(`[PERF_GET_ALL] Mode: ${LOG_MODE.toUpperCase()} | ParseParam: ${pParams.toFixed(3)}ms | DB_Query: ${pDb.toFixed(3)}ms | Total: ${pTotal.toFixed(3)}ms`);
+    
     return {
       success: true,
       pagination: { page, limit },
@@ -107,7 +106,8 @@ export const getMessagesByRoom = async (
         .status(404);
       
       const pTotal = performance.now() - tStart;
-      console.log(`[PERF_BY_ROOM_404] Mode: ${LOG_MODE.toUpperCase()} | Room: ${room_origin_id} | ParseParam: ${pParams.toFixed(3)}ms | DB_Query: ${pDb.toFixed(3)}ms | Total: ${pTotal.toFixed(3)}ms`);
+      
+      req.log.info(`[PERF_BY_ROOM_404] Mode: ${LOG_MODE.toUpperCase()} | Room: ${room_origin_id} | ParseParam: ${pParams.toFixed(3)}ms | DB_Query: ${pDb.toFixed(3)}ms | Total: ${pTotal.toFixed(3)}ms`);
 
       return {
         success: false,
@@ -116,7 +116,8 @@ export const getMessagesByRoom = async (
     }
 
     const pTotal = performance.now() - tStart;
-    console.log(`[PERF_BY_ROOM_200] Mode: ${LOG_MODE.toUpperCase()} | Room: ${room_origin_id} | ParseParam: ${pParams.toFixed(3)}ms | DB_Query: ${pDb.toFixed(3)}ms | Total: ${pTotal.toFixed(3)}ms`);
+    
+    req.log.info(`[PERF_BY_ROOM_200] Mode: ${LOG_MODE.toUpperCase()} | Room: ${room_origin_id} | ParseParam: ${pParams.toFixed(3)}ms | DB_Query: ${pDb.toFixed(3)}ms | Total: ${pTotal.toFixed(3)}ms`);
 
     return {
       success: true,

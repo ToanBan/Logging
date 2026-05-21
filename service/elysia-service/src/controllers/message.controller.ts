@@ -28,7 +28,7 @@ export const getMessages = async ({ query, store, set }: any) => {
     const pDb = tDbDone - tParamDone;
     const pTotal = performance.now() - tStart;
 
-    console.log(`[ELYSIA_PERF_GET_ALL] Mode: ${LOG_MODE.toUpperCase()} | ParseParam: ${pParams.toFixed(3)}ms | DB_Query: ${pDb.toFixed(3)}ms | Total: ${pTotal.toFixed(3)}ms`);
+    store.logger.info(`[ELYSIA_PERF_GET_ALL] Mode: ${LOG_MODE.toUpperCase()} | ParseParam: ${pParams.toFixed(3)}ms | DB_Query: ${pDb.toFixed(3)}ms | Total: ${pTotal.toFixed(3)}ms`);
 
     return {
       success: true,
@@ -86,7 +86,8 @@ export const getMessagesByRoom = async ({ params, query, store, set }: any) => {
       set.headers = { connection: "keep-alive" };
       
       const pTotal = performance.now() - tStart;
-      console.log(`[ELYSIA_PERF_BY_ROOM_404] Mode: ${LOG_MODE.toUpperCase()} | Room: ${room_origin_id} | ParseParam: ${pParams.toFixed(3)}ms | DB_Query: ${pDb.toFixed(3)}ms | Total: ${pTotal.toFixed(3)}ms`);
+      
+      store.logger.info(`[ELYSIA_PERF_BY_ROOM_404] Mode: ${LOG_MODE.toUpperCase()} | Room: ${room_origin_id} | ParseParam: ${pParams.toFixed(3)}ms | DB_Query: ${pDb.toFixed(3)}ms | Total: ${pTotal.toFixed(3)}ms`);
 
       return {
         success: false,
@@ -95,7 +96,8 @@ export const getMessagesByRoom = async ({ params, query, store, set }: any) => {
     }
 
     const pTotal = performance.now() - tStart;
-    console.log(`[ELYSIA_PERF_BY_ROOM_200] Mode: ${LOG_MODE.toUpperCase()} | Room: ${room_origin_id} | ParseParam: ${pParams.toFixed(3)}ms | DB_Query: ${pDb.toFixed(3)}ms | Total: ${pTotal.toFixed(3)}ms`);
+    
+    store.logger.info(`[ELYSIA_PERF_BY_ROOM_200] Mode: ${LOG_MODE.toUpperCase()} | Room: ${room_origin_id} | ParseParam: ${pParams.toFixed(3)}ms | DB_Query: ${pDb.toFixed(3)}ms | Total: ${pTotal.toFixed(3)}ms`);
 
     return {
       success: true,

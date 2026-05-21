@@ -25,15 +25,13 @@ var (
 )
 
 func main() {
-	// Lấy LOG_MODE
 	logMode = strings.ToLower(strings.TrimSpace(os.Getenv("LOG_MODE")))
 	if logMode == "" {
 		logMode = "none"
 	}
 
-	// Khởi tạo logger
 	if logMode == "none" {
-		logger = zerolog.New(io.Discard) // không ghi gì hết
+		logger = zerolog.New(io.Discard) 
 	} else {
 		if logMode == "selective" {
 			zerolog.SetGlobalLevel(zerolog.WarnLevel)
@@ -43,7 +41,6 @@ func main() {
 		logger = zerolog.New(os.Stdout).With().Timestamp().Logger()
 	}
 
-	// Khởi tạo Database Pool
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		dbURL = "postgresql://postgres:postgres@localhost:5433/logging_benchmark"
@@ -69,11 +66,9 @@ func main() {
 	}
 	logger.Info().Msg("Database connection test successful!")
 
-	// Khởi tạo Fiber
 	app := fiber.New(fiber.Config{DisableStartupMessage: true})
 	app.Use(recover.New())
 
-	// Middleware req_id
 	app.Use(func(c *fiber.Ctx) error {
 		reqID := c.Get("x-request-id")
 		if reqID == "" {
@@ -89,7 +84,6 @@ func main() {
 		return c.Next()
 	})
 
-	// Routes
 	app.Get("/health", func(c *fiber.Ctx) error {
 		if logMode == "structured" {
 			getLogger(c).Info().Str("event", "health_check").Msg("")
@@ -160,14 +154,12 @@ func scanRowsToMaps(rows pgx.Rows) ([]map[string]interface{}, error) {
 }
 
 func getMessages(c *fiber.Ctx) error {
-	// ⏱️ BẮT ĐẦU ĐO
 	tStart := time.Now()
 
 	reqLog := getLogger(c)
 	pageStr := c.Query("page", "1")
 	limitStr := c.Query("limit", "10")
 
-	// LOG_MODE switch
 	if logMode == "structured" {
 		reqLog.Info().Str("event", "get_messages_request").
 			Str("page", pageStr).Str("limit", limitStr).Msg("")
@@ -186,7 +178,6 @@ func getMessages(c *fiber.Ctx) error {
 	}
 	offset := (page - 1) * limit
 
-	// ⏱️ CHẶNG 1: Xong bước tính toán tham số
 	tParamDone := time.Now()
 
 	dataQuery := "SELECT * FROM chat_message ORDER BY created_at DESC LIMIT $1 OFFSET $2"
@@ -211,16 +202,19 @@ func getMessages(c *fiber.Ctx) error {
 		})
 	}
 
-	// ⏱️ CHẶNG 2: Database và Scan hoàn tất
 	tDbDone := time.Now()
 
-	// Tính toán thời gian phân đoạn ra đơn vị ms
 	pParams := float64(tParamDone.Sub(tStart).Nanoseconds()) / 1e6
 	pDb := float64(tDbDone.Sub(tParamDone).Nanoseconds()) / 1e6
 	pTotal := float64(time.Since(tStart).Nanoseconds()) / 1e6
 
-	// In kết quả đo đạc ra console cho hàm lấy tất cả
-	fmt.Printf("[FIBER_PERF_GET_ALL] Mode: %s | ParseParam: %.3fms | DB_Query: %.3fms | Total: %.3fms\n", strings.ToUpper(logMode), pParams, pDb, pTotal)
+	reqLog.Info().
+		Str("perf_type", "FIBER_PERF_GET_ALL").
+		Str("mode", strings.ToUpper(logMode)).
+		Float64("parse_param_ms", pParams).
+		Float64("db_query_ms", pDb).
+		Float64("total_ms", pTotal).
+		Msgf("[FIBER_PERF_GET_ALL] Mode: %s | ParseParam: %.3fms | DB_Query: %.3fms | Total: %.3fms", strings.ToUpper(logMode), pParams, pDb, pTotal)
 
 	return c.JSON(fiber.Map{
 		"success":    true,
@@ -230,7 +224,6 @@ func getMessages(c *fiber.Ctx) error {
 }
 
 func getMessagesByRoom(c *fiber.Ctx) error {
-	// ⏱️ BẮT ĐẦU ĐO
 	tStart := time.Now()
 
 	reqLog := getLogger(c)
@@ -256,7 +249,6 @@ func getMessagesByRoom(c *fiber.Ctx) error {
 	}
 	offset := (page - 1) * limit
 
-	// ⏱️ CHẶNG 1: Xong bước tính toán tham số
 	tParamDone := time.Now()
 
 	rows, err := dbPool.Query(c.Context(), "SELECT * FROM chat_message WHERE room_origin_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3", roomOriginID, limit, offset)
@@ -280,7 +272,6 @@ func getMessagesByRoom(c *fiber.Ctx) error {
 		})
 	}
 
-	// ⏱️ CHẶNG 2: Database và Scan hoàn tất
 	tDbDone := time.Now()
 
 	pParams := float64(tParamDone.Sub(tStart).Nanoseconds()) / 1e6
@@ -292,8 +283,15 @@ func getMessagesByRoom(c *fiber.Ctx) error {
 		}
 		
 		pTotal := float64(time.Since(tStart).Nanoseconds()) / 1e6
-		// Log lỗi 404 cho Fiber
-		fmt.Printf("[FIBER_PERF_BY_ROOM_404] Mode: %s | Room: %s | ParseParam: %.3fms | DB_Query: %.3fms | Total: %.3fms\n", strings.ToUpper(logMode), roomOriginID, pParams, pDb, pTotal)
+		
+		reqLog.Info().
+			Str("perf_type", "FIBER_PERF_BY_ROOM_404").
+			Str("mode", strings.ToUpper(logMode)).
+			Str("room_id", roomOriginID).
+			Float64("parse_param_ms", pParams).
+			Float64("db_query_ms", pDb).
+			Float64("total_ms", pTotal).
+			Msgf("[FIBER_PERF_BY_ROOM_404] Mode: %s | Room: %s | ParseParam: %.3fms | DB_Query: %.3fms | Total: %.3fms", strings.ToUpper(logMode), roomOriginID, pParams, pDb, pTotal)
 
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"success": false,
@@ -302,8 +300,15 @@ func getMessagesByRoom(c *fiber.Ctx) error {
 	}
 
 	pTotal := float64(time.Since(tStart).Nanoseconds()) / 1e6
-	// Log thành công 200 cho Fiber
-	fmt.Printf("[FIBER_PERF_BY_ROOM_200] Mode: %s | Room: %s | ParseParam: %.3fms | DB_Query: %.3fms | Total: %.3fms\n", strings.ToUpper(logMode), roomOriginID, pParams, pDb, pTotal)
+	
+	reqLog.Info().
+		Str("perf_type", "FIBER_PERF_BY_ROOM_200").
+		Str("mode", strings.ToUpper(logMode)).
+		Str("room_id", roomOriginID).
+		Float64("parse_param_ms", pParams).
+		Float64("db_query_ms", pDb).
+		Float64("total_ms", pTotal).
+		Msgf("[FIBER_PERF_BY_ROOM_200] Mode: %s | Room: %s | ParseParam: %.3fms | DB_Query: %.3fms | Total: %.3fms", strings.ToUpper(logMode), roomOriginID, pParams, pDb, pTotal)
 
 	return c.JSON(fiber.Map{
 		"success":    true,

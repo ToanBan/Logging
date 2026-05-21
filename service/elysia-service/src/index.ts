@@ -10,7 +10,6 @@ const logger = pino({
   level: LOG_MODE === "none" ? "silent" : (LOG_MODE === "selective" ? "warn" : "info"),
 })
 
-// Kiểm tra kết nối DB với postgres.js
 try {
   await sql`SELECT 1`
   if (LOG_MODE !== "none") {
@@ -54,4 +53,4 @@ const app = new Elysia()
   .use(messageRoutes)
   .listen(Number(process.env.PORT) || 3002)
 
-console.log(`Elysia benchmark service running on port ${Number(process.env.PORT) || 3002}`)
+logger.info(`Elysia benchmark service running on port ${Number(process.env.PORT) || 3002}`)

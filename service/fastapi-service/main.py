@@ -12,7 +12,6 @@ import psycopg2.extras
 
 LOG_MODE = os.getenv("LOG_MODE", "none").strip().lower()  # none | structured | selective
 
-# Cấu hình structured logging
 processors = [
     structlog.contextvars.merge_contextvars,
     structlog.processors.add_log_level,
@@ -106,7 +105,6 @@ def get_messages(
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=100)
 ):
-    # ⏱️ BẮT ĐẦU ĐO
     t_start = time.perf_counter()
 
     if LOG_MODE == "structured":
@@ -114,7 +112,6 @@ def get_messages(
 
     offset = (page - 1) * limit
 
-    # ⏱️ CHẶNG 1: Xong bước tính toán tham số
     t_param_done = time.perf_counter()
 
     try:
@@ -131,16 +128,20 @@ def get_messages(
             if msg.get("updated_at"):
                 msg["updated_at"] = msg["updated_at"].isoformat()
 
-        # ⏱️ CHẶNG 2: Database trả kết quả và format xong dữ liệu
         t_db_done = time.perf_counter()
 
-        # Tính toán thời gian phân đoạn (Quy đổi từ giây sang mili-giây)
         p_params = (t_param_done - t_start) * 1000
         p_db = (t_db_done - t_param_done) * 1000
         p_total = (time.perf_counter() - t_start) * 1000
 
-        # In kết quả đo đạc ra console
-        print(f"[FASTAPI_PERF_GET_ALL] Mode: {LOG_MODE.upper()} | ParseParam: {p_params:.3f}ms | DB_Query: {p_db:.3f}ms | Total: {p_total:.3f}ms", flush=True)
+        logger.info(
+            f"[FASTAPI_PERF_GET_ALL] Mode: {LOG_MODE.upper()} | ParseParam: {p_params:.3f}ms | DB_Query: {p_db:.3f}ms | Total: {p_total:.3f}ms",
+            perf_type="FASTAPI_PERF_GET_ALL",
+            mode=LOG_MODE.upper(),
+            parse_param_ms=round(p_params, 3),
+            db_query_ms=round(p_db, 3),
+            total_ms=round(p_total, 3)
+        )
 
         return {
             "success": True,
@@ -169,7 +170,6 @@ def get_messages_by_room(
 
     offset = (page - 1) * limit
 
-    # ⏱️ CHẶNG 1: Xong bước tính toán tham số
     t_param_done = time.perf_counter()
 
     try:
@@ -180,7 +180,6 @@ def get_messages_by_room(
             )
             messages = cur.fetchall()
 
-        # Tính toán thời gian phân đoạn trước phòng hờ rẽ nhánh
         p_params = (t_param_done - t_start) * 1000
         p_db = (time.perf_counter() - t_param_done) * 1000
 
@@ -189,8 +188,16 @@ def get_messages_by_room(
                 logger.warning("get_messages_by_room_not_found", room_origin_id=room_origin_id)
             
             p_total = (time.perf_counter() - t_start) * 1000
-            # Log lỗi 404 cho FastAPI
-            print(f"[FASTAPI_PERF_BY_ROOM_404] Mode: {LOG_MODE.upper()} | Room: {room_origin_id} | ParseParam: {p_params:.3f}ms | DB_Query: {p_db:.3f}ms | Total: {p_total:.3f}ms", flush=True)
+            
+            logger.info(
+                f"[FASTAPI_PERF_BY_ROOM_404] Mode: {LOG_MODE.upper()} | Room: {room_origin_id} | ParseParam: {p_params:.3f}ms | DB_Query: {p_db:.3f}ms | Total: {p_total:.3f}ms",
+                perf_type="FASTAPI_PERF_BY_ROOM_404",
+                mode=LOG_MODE.upper(),
+                room_id=room_origin_id,
+                parse_param_ms=round(p_params, 3),
+                db_query_ms=round(p_db, 3),
+                total_ms=round(p_total, 3)
+            )
 
             return JSONResponse(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -203,13 +210,19 @@ def get_messages_by_room(
             if message.get("updated_at"):
                 message["updated_at"] = message["updated_at"].isoformat()
 
-        # ⏱️ CHẶNG 2 (Thành công): Cập nhật lại mốc kết thúc DB thực tế sau khi loop format xong
         t_db_done = time.perf_counter()
         p_db = (t_db_done - t_param_done) * 1000
         p_total = (time.perf_counter() - t_start) * 1000
 
-        # Log thành công 200 cho FastAPI
-        print(f"[FASTAPI_PERF_BY_ROOM_200] Mode: {LOG_MODE.upper()} | Room: {room_origin_id} | ParseParam: {p_params:.3f}ms | DB_Query: {p_db:.3f}ms | Total: {p_total:.3f}ms", flush=True)
+        logger.info(
+            f"[FASTAPI_PERF_BY_ROOM_200] Mode: {LOG_MODE.upper()} | Room: {room_origin_id} | ParseParam: {p_params:.3f}ms | DB_Query: {p_db:.3f}ms | Total: {p_total:.3f}ms",
+            perf_type="FASTAPI_PERF_BY_ROOM_200",
+            mode=LOG_MODE.upper(),
+            room_id=room_origin_id,
+            parse_param_ms=round(p_params, 3),
+            db_query_ms=round(p_db, 3),
+            total_ms=round(p_total, 3)
+        )
 
         return {
             "success": True,

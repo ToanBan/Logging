@@ -13,7 +13,5 @@ export const options = {
 
 export default function () {
   const url = 'http://localhost:3001/messages/room/1'; 
-  
   http.get(url); 
-
 }

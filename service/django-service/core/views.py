@@ -10,7 +10,35 @@ import psycopg2.extras
 
 from psycopg2.pool import ThreadedConnectionPool
 
-LOG_MODE = os.getenv("LOG_MODE", "none").strip().lower()
+LOG_MODE = os.getenv("LOG_MODE", "none").strip().lower()  # none | structured | selective
+
+processors = [
+    structlog.contextvars.merge_contextvars,
+    structlog.processors.add_log_level,
+    structlog.processors.TimeStamper(fmt="iso"),
+]
+
+if LOG_MODE == "none":
+    structlog.configure(
+        processors=[structlog.processors.JSONRenderer()],
+        logger_factory=structlog.WriteLoggerFactory(file=open(os.devnull, "w"))
+    )
+elif LOG_MODE == "selective":
+    import logging
+    structlog.configure(
+        processors=processors + [structlog.processors.JSONRenderer()],
+        context_class=dict,
+        wrapper_class=structlog.make_filtering_bound_logger(logging.WARNING),
+        logger_factory=structlog.PrintLoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+else:
+    structlog.configure(
+        processors=processors + [structlog.processors.JSONRenderer()],
+        context_class=dict,
+        logger_factory=structlog.PrintLoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
 
 logger = structlog.get_logger()
 
@@ -34,7 +62,6 @@ def get_db_cursor():
     finally:
         db_pool.putconn(conn)
 
-# Kiểm tra kết nối khi boot
 try:
     with get_db_cursor() as cur:
         cur.execute("SELECT 1")
@@ -54,7 +81,6 @@ def health(request):
 
 
 def get_messages(request):
-    # ⏱️ BẮT ĐẦU ĐO
     t_start = time.perf_counter()
 
     try:
@@ -73,7 +99,6 @@ def get_messages(request):
 
     offset = (page - 1) * limit
 
-    # ⏱️ CHẶNG 1: Xong bước parse param và chạy logger request
     t_param_done = time.perf_counter()
 
     try:
@@ -90,16 +115,20 @@ def get_messages(request):
             if msg.get("updated_at"):
                 msg["updated_at"] = msg["updated_at"].isoformat()
 
-        # ⏱️ CHẶNG 2: Database trả kết quả và format xong dữ liệu
         t_db_done = time.perf_counter()
 
-        # Tính toán thời gian phân đoạn (Quy đổi sang mili-giây)
         p_params = (t_param_done - t_start) * 1000
         p_db = (t_db_done - t_param_done) * 1000
         p_total = (time.perf_counter() - t_start) * 1000
 
-        # In kết quả đo đạc ra terminal
-        print(f"[DJANGO_PERF_GET_ALL] Mode: {LOG_MODE.upper()} | ParseParam: {p_params:.3f}ms | DB_Query: {p_db:.3f}ms | Total: {p_total:.3f}ms", flush=True)
+        logger.info(
+            f"[DJANGO_PERF_GET_ALL] Mode: {LOG_MODE.upper()} | ParseParam: {p_params:.3f}ms | DB_Query: {p_db:.3f}ms | Total: {p_total:.3f}ms",
+            perf_type="DJANGO_PERF_GET_ALL",
+            mode=LOG_MODE.upper(),
+            parse_param_ms=round(p_params, 3),
+            db_query_ms=round(p_db, 3),
+            total_ms=round(p_total, 3)
+        )
 
         return JsonResponse({
             "success": True,
@@ -117,7 +146,6 @@ def get_messages(request):
 
 
 def get_messages_by_room(request, room_origin_id):
-    # ⏱️ BẮT ĐẦU ĐO
     t_start = time.perf_counter()
 
     if LOG_MODE == "structured":
@@ -136,7 +164,6 @@ def get_messages_by_room(request, room_origin_id):
 
     offset = (page - 1) * limit
 
-    # ⏱️ CHẶNG 1: Xong bước parse param và logger request
     t_param_done = time.perf_counter()
 
     try:
@@ -147,7 +174,6 @@ def get_messages_by_room(request, room_origin_id):
             )
             messages = cur.fetchall()
 
-        # Tính toán thời gian phân đoạn trước đề phòng rẽ nhánh 404
         p_params = (t_param_done - t_start) * 1000
         p_db = (time.perf_counter() - t_param_done) * 1000
 
@@ -156,8 +182,16 @@ def get_messages_by_room(request, room_origin_id):
                 logger.warning("get_messages_by_room_not_found", room_origin_id=room_origin_id)
             
             p_total = (time.perf_counter() - t_start) * 1000
-            # Log lỗi 404 cho Django
-            print(f"[DJANGO_PERF_BY_ROOM_404] Mode: {LOG_MODE.upper()} | Room: {room_origin_id} | ParseParam: {p_params:.3f}ms | DB_Query: {p_db:.3f}ms | Total: {p_total:.3f}ms", flush=True)
+            
+            logger.info(
+                f"[DJANGO_PERF_BY_ROOM_404] Mode: {LOG_MODE.upper()} | Room: {room_origin_id} | ParseParam: {p_params:.3f}ms | DB_Query: {p_db:.3f}ms | Total: {p_total:.3f}ms",
+                perf_type="DJANGO_PERF_BY_ROOM_404",
+                mode=LOG_MODE.upper(),
+                room_id=room_origin_id,
+                parse_param_ms=round(p_params, 3),
+                db_query_ms=round(p_db, 3),
+                total_ms=round(p_total, 3)
+            )
 
             return JsonResponse(
                 {"success": False, "error": f"No messages found for room {room_origin_id}"},
@@ -170,13 +204,19 @@ def get_messages_by_room(request, room_origin_id):
             if message.get("updated_at"):
                 message["updated_at"] = message["updated_at"].isoformat()
 
-        # ⏱️ CHẶNG 2 (Thành công): Đo mốc hoàn thành thực tế của DB và vòng lặp
         t_db_done = time.perf_counter()
         p_db = (t_db_done - t_param_done) * 1000
         p_total = (time.perf_counter() - t_start) * 1000
 
-        # Log thành công 200 cho Django
-        print(f"[DJANGO_PERF_BY_ROOM_200] Mode: {LOG_MODE.upper()} | Room: {room_origin_id} | ParseParam: {p_params:.3f}ms | DB_Query: {p_db:.3f}ms | Total: {p_total:.3f}ms", flush=True)
+        logger.info(
+            f"[DJANGO_PERF_BY_ROOM_200] Mode: {LOG_MODE.upper()} | Room: {room_origin_id} | ParseParam: {p_params:.3f}ms | DB_Query: {p_db:.3f}ms | Total: {p_total:.3f}ms",
+            perf_type="DJANGO_PERF_BY_ROOM_200",
+            mode=LOG_MODE.upper(),
+            room_id=room_origin_id,
+            parse_param_ms=round(p_params, 3),
+            db_query_ms=round(p_db, 3),
+            total_ms=round(p_total, 3)
+        )
 
         return JsonResponse({
             "success": True,
