@@ -3,6 +3,7 @@ module gin-service
 go 1.26.3
 
 require (
+	shared/logger v0.0.0
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic v1.15.0 // indirect
 	github.com/bytedance/sonic/loader v0.5.0 // indirect
@@ -42,3 +43,5 @@ require (
 	golang.org/x/text v0.34.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
 )
+
+replace shared/logger => ../../shared/logger/go

@@ -4,10 +4,11 @@ ENV GOTOOLCHAIN=auto
 
 WORKDIR /app
 
-COPY go.mod go.sum ./
+COPY service/gin-service/go.mod service/gin-service/go.sum ./
+COPY shared/logger/go /shared/logger/go
 RUN go mod download
 
-COPY main.go ./
+COPY service/gin-service/main.go ./
 RUN CGO_ENABLED=0 GOOS=linux go build -o gin-service .
 
 FROM alpine:3.21

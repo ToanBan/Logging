@@ -5,11 +5,12 @@ RUN corepack enable
 
 WORKDIR /app
 
-COPY package.json ./
+COPY service/fastify-service/package.json ./
 RUN pnpm install --frozen-lockfile --ignore-scripts 2>/dev/null || pnpm install --ignore-scripts
 
-COPY tsconfig.json ./
-COPY src ./src
+COPY service/fastify-service/tsconfig.json ./
+COPY service/fastify-service/src ./src
+COPY shared /shared
 
 EXPOSE 3001
 

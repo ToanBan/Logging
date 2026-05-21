@@ -2,11 +2,15 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-COPY requirements.txt ./
+COPY service/django-service/requirements.txt ./
+
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY manage.py ./
-COPY core ./core
+COPY service/django-service/manage.py ./manage.py
+
+COPY service/django-service/core ./core
+
+COPY shared ./shared
 
 EXPOSE 3006
 

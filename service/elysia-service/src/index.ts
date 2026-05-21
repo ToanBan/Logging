@@ -1,23 +1,29 @@
 import { Elysia } from "elysia";
-import pino from "pino";
 import { randomUUID } from "crypto";
-import sql from "./config/db";
+import db from "./config/db";
 import { messageRoutes } from "./routes/message.routes";
+import { createLogger } from "@shared/logger";
 
-const LOG_MODE = (process.env.LOG_MODE || "none").trim().toLowerCase()
+const LOG_MODE = (process.env.LOG_MODE || "none")
+  .trim()
+  .toLowerCase();
 
-const logger = pino({
-  level: LOG_MODE === "none" ? "silent" : (LOG_MODE === "selective" ? "warn" : "info"),
-})
+const log = createLogger("elysia-service");
 
 try {
-  await sql`SELECT 1`
+  await db`SELECT 1`;
+
   if (LOG_MODE !== "none") {
-    logger.info("Database connection test successful!")
+    log.info("database connection successful");
   }
-} catch (err) {
-  logger.error(err, "Failed to connect to database")
-  process.exit(1)
+} catch (err: any) {
+  log.error("failed to connect to database", {
+    extra: {
+      error: err.message,
+    },
+  });
+
+  process.exit(1);
 }
 
 const nopLogger = {
@@ -25,32 +31,48 @@ const nopLogger = {
   warn: () => {},
   error: () => {},
   debug: () => {},
-  child: () => nopLogger,
-}
+};
 
 const app = new Elysia()
   .state({
-    logger: LOG_MODE === "none" ? nopLogger as any : logger,
+    logger: LOG_MODE === "none" ? (nopLogger as any) : log,
     reqId: "",
   })
-  .onRequest(({ request, store, set }) => {
-    if (LOG_MODE === "none") return
 
-    const reqId = request.headers.get("x-request-id") || randomUUID()
-    store.reqId = reqId
-    store.logger = logger.child({
-      req_id: reqId,
-      service: "elysia-service",
-    })
-    set.headers["x-request-id"] = reqId
+  .onRequest(({ request, store, set }) => {
+    const reqId =
+      request.headers.get("x-request-id") || randomUUID();
+
+    store.reqId = reqId;
+
+    set.headers["x-request-id"] = reqId;
+
+    if (LOG_MODE === "none") return;
+
+    store.logger = log;
   })
+
   .get("/health", ({ store }) => {
     if (LOG_MODE === "structured") {
-      store.logger.info({ event: "health_check" })
+      store.logger.info("health check", {
+        req_id: store.reqId,
+      });
     }
-    return { ok: true, service: "elysia-service" }
-  })
-  .use(messageRoutes)
-  .listen(Number(process.env.PORT) || 3002)
 
-logger.info(`Elysia benchmark service running on port ${Number(process.env.PORT) || 3002}`)
+    return {
+      ok: true,
+      service: "elysia-service",
+    };
+  })
+
+  .use(messageRoutes)
+
+  .listen(Number(process.env.PORT) || 3002);
+
+if (LOG_MODE !== "none") {
+  log.info(
+    `server running on port ${
+      Number(process.env.PORT) || 3002
+    }`,
+  );
+}

@@ -5,40 +5,21 @@ import Fastify, { FastifyRequest, FastifyReply } from "fastify";
 import { randomUUID } from "crypto";
 import sql from "./config/db";
 import messageRoutes from "./routes/message.routes";
+import { createLogger } from "@shared/logger";
 
 const LOG_MODE = (process.env.LOG_MODE || "none").trim().toLowerCase();
+const log = createLogger("fastify-service");
 
-const nopLogger = {
-  info: () => {},
-  warn: () => {},
-  error: () => {},
-  debug: () => {},
-  trace: () => {},
-  fatal: () => {},
-  child: () => nopLogger,
-} as any;
+const app = Fastify({ logger: false });
 
-const app = Fastify({
-  logger: LOG_MODE === "none" ? false : { level: LOG_MODE === "selective" ? "warn" : "info" },
-});
-
-app.addHook("onRequest", async (req: FastifyRequest, reply: FastifyReply) => {
+app.addHook("onRequest", async (req: FastifyRequest) => {
   const reqId = req.headers["x-request-id"]?.toString() || randomUUID();
   req.headers["x-request-id"] = reqId;
-
-  if (LOG_MODE === "none") {
-    req.log = nopLogger;
-  } else {
-    req.log = req.log.child({
-      req_id: reqId,
-      service: "fastify-service",
-    });
-  }
 });
 
-app.get("/health", async (req: FastifyRequest, reply: FastifyReply) => {
+app.get("/health", async (req: FastifyRequest) => {
   if (LOG_MODE === "structured") {
-    req.log.info({ event: "health_check" });
+    log.info("health check", { req_id: req.headers["x-request-id"] as string });
   }
   return { ok: true, service: "fastify-service" };
 });
@@ -50,17 +31,17 @@ const start = async () => {
     await sql`SELECT 1`;
 
     if (LOG_MODE !== "none") {
-      app.log.info("Database connection test successful!");
+      log.info("database connection successful");
     }
 
     const port = Number(process.env.PORT) || 3001;
     await app.listen({ port, host: "0.0.0.0" });
 
     if (LOG_MODE !== "none") {
-      app.log.info(`Fastify benchmark service running on port ${port}`);
+      log.info(`server running on port ${port}`);
     }
-  } catch (err) {
-    app.log.error(err);
+  } catch (err: any) {
+    log.error("server failed to start", { extra: { error: err.message } });
     process.exit(1);
   }
 };

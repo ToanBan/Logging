@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
+	"shared/logger"
 	"strconv"
 	"strings"
 	"time"
@@ -15,12 +15,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/rs/zerolog"
 )
 
 var (
 	dbPool  *pgxpool.Pool
-	logger  zerolog.Logger
+	log     *logger.Logger
 	logMode string
 )
 
@@ -30,16 +29,7 @@ func main() {
 		logMode = "none"
 	}
 
-	if logMode == "none" {
-		logger = zerolog.New(io.Discard) 
-	} else {
-		if logMode == "selective" {
-			zerolog.SetGlobalLevel(zerolog.WarnLevel)
-		} else {
-			zerolog.SetGlobalLevel(zerolog.InfoLevel)
-		}
-		logger = zerolog.New(os.Stdout).With().Timestamp().Logger()
-	}
+	log = logger.NewLogger("fiber-service")
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
@@ -48,23 +38,26 @@ func main() {
 
 	config, err := pgxpool.ParseConfig(dbURL)
 	if err != nil {
-		logger.Error().Err(err).Msg("Failed to parse database URL")
+		log.Error("failed to parse database URL", logger.LogContext{Extra: map[string]any{"error": err.Error()}})
 		os.Exit(1)
 	}
 	config.MaxConns = 50
 
 	dbPool, err = pgxpool.NewWithConfig(context.Background(), config)
 	if err != nil {
-		logger.Error().Err(err).Msg("Failed to create database pool")
+		log.Error("failed to create database pool", logger.LogContext{Extra: map[string]any{"error": err.Error()}})
 		os.Exit(1)
 	}
 	defer dbPool.Close()
 
 	if err := dbPool.Ping(context.Background()); err != nil {
-		logger.Error().Err(err).Msg("Failed to connect to database")
+		log.Error("failed to connect to database", logger.LogContext{Extra: map[string]any{"error": err.Error()}})
 		os.Exit(1)
 	}
-	logger.Info().Msg("Database connection test successful!")
+
+	if logMode != "none" {
+		log.Info("database connection successful", logger.LogContext{})
+	}
 
 	app := fiber.New(fiber.Config{DisableStartupMessage: true})
 	app.Use(recover.New())
@@ -75,18 +68,13 @@ func main() {
 			reqID = uuid.New().String()
 		}
 		c.Set("x-request-id", reqID)
-
-		reqLogger := logger.With().
-			Str("req_id", reqID).
-			Str("service", "fiber-service").
-			Logger()
-		c.Locals("logger", &reqLogger)
+		c.Locals("req_id", reqID)
 		return c.Next()
 	})
 
 	app.Get("/health", func(c *fiber.Ctx) error {
 		if logMode == "structured" {
-			getLogger(c).Info().Str("event", "health_check").Msg("")
+			log.Info("health check", logger.LogContext{ReqID: getReqID(c)})
 		}
 		return c.JSON(fiber.Map{"ok": true, "service": "fiber-service"})
 	})
@@ -98,19 +86,23 @@ func main() {
 	if port == "" {
 		port = "3004"
 	}
-	logger.Info().Msgf("Fiber service running on port %s", port)
+
+	if logMode != "none" {
+		log.Info(fmt.Sprintf("server running on port %s", port), logger.LogContext{})
+	}
+
 	if err := app.Listen(":" + port); err != nil {
-		logger.Fatal().Err(err).Msg("Server failed to start")
+		log.Fatal("server failed to start", logger.LogContext{Extra: map[string]any{"error": err.Error()}})
 	}
 }
 
-func getLogger(c *fiber.Ctx) *zerolog.Logger {
-	if val := c.Locals("logger"); val != nil {
-		if l, ok := val.(*zerolog.Logger); ok {
-			return l
+func getReqID(c *fiber.Ctx) string {
+	if val := c.Locals("req_id"); val != nil {
+		if id, ok := val.(string); ok {
+			return id
 		}
 	}
-	return &logger
+	return ""
 }
 
 func scanRowsToMaps(rows pgx.Rows) ([]map[string]interface{}, error) {
@@ -155,14 +147,16 @@ func scanRowsToMaps(rows pgx.Rows) ([]map[string]interface{}, error) {
 
 func getMessages(c *fiber.Ctx) error {
 	tStart := time.Now()
+	reqID := getReqID(c)
 
-	reqLog := getLogger(c)
 	pageStr := c.Query("page", "1")
 	limitStr := c.Query("limit", "10")
 
 	if logMode == "structured" {
-		reqLog.Info().Str("event", "get_messages_request").
-			Str("page", pageStr).Str("limit", limitStr).Msg("")
+		log.Info("get messages request", logger.LogContext{
+			ReqID: reqID,
+			Extra: map[string]any{"page": pageStr, "limit": limitStr},
+		})
 	}
 
 	page, err := strconv.Atoi(pageStr)
@@ -177,44 +171,37 @@ func getMessages(c *fiber.Ctx) error {
 		limit = 100
 	}
 	offset := (page - 1) * limit
-
 	tParamDone := time.Now()
 
-	dataQuery := "SELECT * FROM chat_message ORDER BY created_at DESC LIMIT $1 OFFSET $2"
-	rows, err := dbPool.Query(c.Context(), dataQuery, limit, offset)
+	rows, err := dbPool.Query(c.Context(), "SELECT * FROM chat_message ORDER BY created_at DESC LIMIT $1 OFFSET $2", limit, offset)
 	if err != nil {
 		if logMode == "structured" || logMode == "selective" {
-			reqLog.Error().Err(err).Str("event", "get_messages_error").Msg("")
+			log.Error("get messages error", logger.LogContext{
+				ReqID: reqID,
+				Extra: map[string]any{"error": err.Error()},
+			})
 		}
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"success": false, "error": err.Error(),
-		})
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"success": false, "error": err.Error()})
 	}
 	defer rows.Close()
 
 	messages, err := scanRowsToMaps(rows)
 	if err != nil {
 		if logMode == "structured" || logMode == "selective" {
-			reqLog.Error().Err(err).Str("event", "get_messages_error").Msg("")
+			log.Error("get messages scan error", logger.LogContext{
+				ReqID: reqID,
+				Extra: map[string]any{"error": err.Error()},
+			})
 		}
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"success": false, "error": err.Error(),
-		})
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"success": false, "error": err.Error()})
 	}
 
 	tDbDone := time.Now()
-
 	pParams := float64(tParamDone.Sub(tStart).Nanoseconds()) / 1e6
 	pDb := float64(tDbDone.Sub(tParamDone).Nanoseconds()) / 1e6
 	pTotal := float64(time.Since(tStart).Nanoseconds()) / 1e6
 
-	reqLog.Info().
-		Str("perf_type", "FIBER_PERF_GET_ALL").
-		Str("mode", strings.ToUpper(logMode)).
-		Float64("parse_param_ms", pParams).
-		Float64("db_query_ms", pDb).
-		Float64("total_ms", pTotal).
-		Msgf("[FIBER_PERF_GET_ALL] Mode: %s | ParseParam: %.3fms | DB_Query: %.3fms | Total: %.3fms", strings.ToUpper(logMode), pParams, pDb, pTotal)
+	log.Info(fmt.Sprintf("[FIBER_PERF_GET_ALL] Mode: %s | ParseParam: %.3fms | DB_Query: %.3fms | Total: %.3fms", strings.ToUpper(logMode), pParams, pDb, pTotal), logger.LogContext{ReqID: reqID})
 
 	return c.JSON(fiber.Map{
 		"success":    true,
@@ -225,12 +212,14 @@ func getMessages(c *fiber.Ctx) error {
 
 func getMessagesByRoom(c *fiber.Ctx) error {
 	tStart := time.Now()
-
-	reqLog := getLogger(c)
+	reqID := getReqID(c)
 	roomOriginID := c.Params("room_origin_id")
 
 	if logMode == "structured" {
-		reqLog.Info().Str("event", "get_messages_by_room_request").Str("room_origin_id", roomOriginID).Msg("")
+		log.Info("get messages by room request", logger.LogContext{
+			ReqID: reqID,
+			Extra: map[string]any{"room_origin_id": roomOriginID},
+		})
 	}
 
 	pageStr := c.Query("page", "1")
@@ -248,50 +237,45 @@ func getMessagesByRoom(c *fiber.Ctx) error {
 		limit = 100
 	}
 	offset := (page - 1) * limit
-
 	tParamDone := time.Now()
 
 	rows, err := dbPool.Query(c.Context(), "SELECT * FROM chat_message WHERE room_origin_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3", roomOriginID, limit, offset)
 	if err != nil {
 		if logMode == "structured" || logMode == "selective" {
-			reqLog.Error().Err(err).Str("event", "get_messages_by_room_error").Str("room_origin_id", roomOriginID).Msg("")
+			log.Error("get messages by room error", logger.LogContext{
+				ReqID: reqID,
+				Extra: map[string]any{"room_origin_id": roomOriginID, "error": err.Error()},
+			})
 		}
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"success": false, "error": err.Error(),
-		})
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"success": false, "error": err.Error()})
 	}
 	defer rows.Close()
 
 	messages, err := scanRowsToMaps(rows)
 	if err != nil {
 		if logMode == "structured" || logMode == "selective" {
-			reqLog.Error().Err(err).Str("event", "get_messages_by_room_error").Str("room_origin_id", roomOriginID).Msg("")
+			log.Error("get messages by room scan error", logger.LogContext{
+				ReqID: reqID,
+				Extra: map[string]any{"room_origin_id": roomOriginID, "error": err.Error()},
+			})
 		}
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"success": false, "error": err.Error(),
-		})
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"success": false, "error": err.Error()})
 	}
 
 	tDbDone := time.Now()
-
 	pParams := float64(tParamDone.Sub(tStart).Nanoseconds()) / 1e6
 	pDb := float64(tDbDone.Sub(tParamDone).Nanoseconds()) / 1e6
 
 	if len(messages) == 0 {
 		if logMode == "structured" || logMode == "selective" {
-			reqLog.Warn().Str("event", "get_messages_by_room_not_found").Str("room_origin_id", roomOriginID).Msg("")
+			log.Warn("room not found", logger.LogContext{
+				ReqID: reqID,
+				Extra: map[string]any{"room_origin_id": roomOriginID},
+			})
 		}
-		
+
 		pTotal := float64(time.Since(tStart).Nanoseconds()) / 1e6
-		
-		reqLog.Info().
-			Str("perf_type", "FIBER_PERF_BY_ROOM_404").
-			Str("mode", strings.ToUpper(logMode)).
-			Str("room_id", roomOriginID).
-			Float64("parse_param_ms", pParams).
-			Float64("db_query_ms", pDb).
-			Float64("total_ms", pTotal).
-			Msgf("[FIBER_PERF_BY_ROOM_404] Mode: %s | Room: %s | ParseParam: %.3fms | DB_Query: %.3fms | Total: %.3fms", strings.ToUpper(logMode), roomOriginID, pParams, pDb, pTotal)
+		log.Info(fmt.Sprintf("[FIBER_PERF_BY_ROOM_404] Mode: %s | Room: %s | ParseParam: %.3fms | DB_Query: %.3fms | Total: %.3fms", strings.ToUpper(logMode), roomOriginID, pParams, pDb, pTotal), logger.LogContext{ReqID: reqID})
 
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"success": false,
@@ -300,15 +284,7 @@ func getMessagesByRoom(c *fiber.Ctx) error {
 	}
 
 	pTotal := float64(time.Since(tStart).Nanoseconds()) / 1e6
-	
-	reqLog.Info().
-		Str("perf_type", "FIBER_PERF_BY_ROOM_200").
-		Str("mode", strings.ToUpper(logMode)).
-		Str("room_id", roomOriginID).
-		Float64("parse_param_ms", pParams).
-		Float64("db_query_ms", pDb).
-		Float64("total_ms", pTotal).
-		Msgf("[FIBER_PERF_BY_ROOM_200] Mode: %s | Room: %s | ParseParam: %.3fms | DB_Query: %.3fms | Total: %.3fms", strings.ToUpper(logMode), roomOriginID, pParams, pDb, pTotal)
+	log.Info(fmt.Sprintf("[FIBER_PERF_BY_ROOM_200] Mode: %s | Room: %s | ParseParam: %.3fms | DB_Query: %.3fms | Total: %.3fms", strings.ToUpper(logMode), roomOriginID, pParams, pDb, pTotal), logger.LogContext{ReqID: reqID})
 
 	return c.JSON(fiber.Map{
 		"success":    true,

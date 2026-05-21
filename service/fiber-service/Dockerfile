@@ -4,10 +4,11 @@ ENV GOTOOLCHAIN=auto
 
 WORKDIR /app
 
-COPY go.mod go.sum ./
+COPY service/fiber-service/go.mod service/fiber-service/go.sum ./
+COPY shared/logger/go /shared/logger/go
 RUN go mod download
 
-COPY main.go ./
+COPY service/fiber-service/main.go ./
 RUN CGO_ENABLED=0 GOOS=linux go build -o fiber-service .
 
 FROM alpine:3.21
