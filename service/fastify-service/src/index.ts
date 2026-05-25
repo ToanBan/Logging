@@ -29,17 +29,8 @@ app.register(messageRoutes);
 const start = async () => {
   try {
     await sql`SELECT 1`;
-
-    if (LOG_MODE !== "none") {
-      log.info("database connection successful");
-    }
-
     const port = Number(process.env.PORT) || 3001;
     await app.listen({ port, host: "0.0.0.0" });
-
-    if (LOG_MODE !== "none") {
-      log.info(`server running on port ${port}`);
-    }
   } catch (err: any) {
     log.error("server failed to start", { extra: { error: err.message } });
     process.exit(1);

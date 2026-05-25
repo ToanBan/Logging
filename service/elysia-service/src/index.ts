@@ -12,10 +12,6 @@ const log = createLogger("elysia-service");
 
 try {
   await db`SELECT 1`;
-
-  if (LOG_MODE !== "none") {
-    log.info("database connection successful");
-  }
 } catch (err: any) {
   log.error("failed to connect to database", {
     extra: {
@@ -38,7 +34,6 @@ const app = new Elysia()
     logger: LOG_MODE === "none" ? (nopLogger as any) : log,
     reqId: "",
   })
-
   .onRequest(({ request, store, set }) => {
     const reqId =
       request.headers.get("x-request-id") || randomUUID();

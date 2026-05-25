@@ -1,39 +1,61 @@
 import http from "k6/http";
 import { sleep } from "k6";
-import { Trend } from "k6/metrics";
-import { vu } from "k6/execution";
+import { Trend, Counter } from "k6/metrics";
 
 const durationAllMessages = new Trend("duration_all_messages", true);
-const durationRoomMessages = new Trend("duration_room_messages", true);
-const BASE_URL = "http://localhost:3002";
+const durationRoomFound = new Trend("duration_room_found", true);
+const durationRoomNotFound = new Trend("duration_room_not_found", true);
+const errorCount = new Counter("error_count");
+
+const BASE_URL = "http://localhost:3004";
+const ROOM_FOUND = "38224506666472305314";
+const ROOM_NOT_FOUND = "room-not-exist-999";
+
 export const options = {
   scenarios: {
-    logging_benchmark: {
-      executor: "ramping-vus",
-      startVUs: 0,
-      stages: [
-        { duration: "15s", target: 50 },
-        { duration: "30s", target: 50 },
-        { duration: "15s", target: 0 },
-      ],
-      gracefulStop: "15s",
+    all_messages: {
+      executor: "constant-vus",
+      vus: 22,
+      duration: "60s",
+      exec: "testAllMessages",
+    },
+    room_found: {
+      executor: "constant-vus",
+      vus: 22,
+      duration: "60s",
+      exec: "testRoomFound",
+    },
+    room_not_found: {
+      executor: "constant-vus",
+      vus: 6,
+      duration: "60s",
+      exec: "testRoomNotFound",
     },
   },
   thresholds: {
-    duration_all_messages: ["p(95)<2000"],
-    duration_room_messages: ["p(95)<2000"],
+    duration_all_messages: ["p(95)<2000", "p(99)<3000"],
+    duration_room_found: ["p(95)<2000", "p(99)<3000"],
+    duration_room_not_found: ["p(95)<2000", "p(99)<3000"],
   },
 };
 
-export default function () {
-  const vuId = vu.idInTest;
-  if (vuId % 2 !== 0) {
-    const r1 = http.get(`${BASE_URL}/messages`);
-    durationAllMessages.add(r1.timings.duration);
-  } else {
-    const r2 = http.get(`${BASE_URL}/messages/room/1`);
-    durationRoomMessages.add(r2.timings.duration);
-  }
+export function testAllMessages() {
+  const r = http.get(`${BASE_URL}/messages`);
+  if (r.status !== 200) errorCount.add(1);
+  durationAllMessages.add(r.timings.duration);
+  sleep(0.1);
+}
 
+export function testRoomFound() {
+  const r = http.get(`${BASE_URL}/messages/room/${ROOM_FOUND}`);
+  if (r.status !== 200) errorCount.add(1);
+  durationRoomFound.add(r.timings.duration);
+  sleep(0.1);
+}
+
+export function testRoomNotFound() {
+  const r = http.get(`${BASE_URL}/messages/room/${ROOM_NOT_FOUND}`);
+  if (r.status !== 404) errorCount.add(1);
+  durationRoomNotFound.add(r.timings.duration);
   sleep(0.1);
 }

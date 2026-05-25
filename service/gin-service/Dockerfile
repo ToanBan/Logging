@@ -6,6 +6,11 @@ WORKDIR /app
 
 COPY service/gin-service/go.mod service/gin-service/go.sum ./
 COPY shared/logger/go /shared/logger/go
+
+COPY shared/logger/go/go.mod /shared/logger/go/go.mod
+COPY shared/logger/go/go.sum /shared/logger/go/go.sum
+COPY shared/logger/go/logger.go /shared/logger/go/logger.go
+
 RUN go mod download
 
 COPY service/gin-service/main.go ./

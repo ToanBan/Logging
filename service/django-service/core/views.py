@@ -1,102 +1,38 @@
-
 import os
-import math
 import uuid
 import contextlib
 import time
-import structlog
 
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpRequest
 
 import psycopg2
 import psycopg2.extras
-
 from psycopg2.pool import ThreadedConnectionPool
 
-from shared.logger.python import create_logger
+from shared.logger.python.logger import create_logger, create_request_logger
 
-
-LOG_MODE = os.getenv(
-    "LOG_MODE",
-    "none"
-).strip().lower()  # none | structured | selective
-
-
-processors = [
-    structlog.contextvars.merge_contextvars,
-    structlog.processors.add_log_level,
-    structlog.processors.TimeStamper(fmt="iso"),
-]
-
-
-if LOG_MODE == "none":
-    structlog.configure(
-        processors=[
-            structlog.processors.JSONRenderer()
-        ],
-        logger_factory=structlog.WriteLoggerFactory(
-            file=open(os.devnull, "w")
-        )
-    )
-
-elif LOG_MODE == "selective":
-    import logging
-
-    structlog.configure(
-        processors=processors + [
-            structlog.processors.JSONRenderer()
-        ],
-        context_class=dict,
-        wrapper_class=structlog.make_filtering_bound_logger(
-            logging.WARNING
-        ),
-        logger_factory=structlog.PrintLoggerFactory(),
-        cache_logger_on_first_use=True,
-    )
-
-else:
-    structlog.configure(
-        processors=processors + [
-            structlog.processors.JSONRenderer()
-        ],
-        context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
-        cache_logger_on_first_use=True,
-    )
-
+LOG_MODE = os.getenv("LOG_MODE", "none").strip().lower()
 
 logger = create_logger("django-service")
-
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://postgres:postgres@localhost:5433/logging_benchmark"
 )
 
-
-db_pool = ThreadedConnectionPool(
-    1,
-    50,
-    dsn=DATABASE_URL
-)
+db_pool = ThreadedConnectionPool(1, 50, dsn=DATABASE_URL)
 
 
 @contextlib.contextmanager
 def get_db_cursor():
     conn = db_pool.getconn()
-
     try:
-        with conn.cursor(
-            cursor_factory=psycopg2.extras.RealDictCursor
-        ) as cur:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             yield cur
-
         conn.commit()
-
     except Exception:
         conn.rollback()
         raise
-
     finally:
         db_pool.putconn(conn)
 
@@ -107,283 +43,126 @@ try:
         cur.fetchone()
 
     if LOG_MODE != "none":
-        logger.info(
-            "database_connection_success"
-        )
+        logger.info("database connection successful")
 
 except Exception as e:
-    if LOG_MODE != "none":
-        logger.error(
-            "database_connection_failed",
-            {
-                "extra": {
-                    "error": str(e)
-                }
-            }
-        )
-
+    logger.error("database connection failed", {"extra": {"error": str(e)}})
     os._exit(1)
 
 
-def health(request):
+def get_req_id(request: HttpRequest) -> str:
+    return request.headers.get("x-request-id", str(uuid.uuid4()))
+
+
+def health(request: HttpRequest):
     if LOG_MODE == "structured":
-        logger.info(
-            "health_check"
-        )
+        logger.info("health check", {"req_id": get_req_id(request)})
 
-    return JsonResponse({
-        "ok": True,
-        "service": "django-service"
-    })
+    return JsonResponse({"ok": True, "service": "django-service"})
 
 
-def get_messages(request):
-    t_start = time.perf_counter()
+def get_messages(request: HttpRequest):
+    req_id = get_req_id(request)
+    req_log = create_request_logger("django-service", req_id) if LOG_MODE == "kafka" else logger
 
     try:
-        page = max(
-            1,
-            int(request.GET.get("page", 1))
-        )
-
+        page = max(1, int(request.GET.get("page", 1)))
     except ValueError:
         page = 1
 
     try:
-        limit = int(request.GET.get("limit", 10))
-        limit = max(1, min(100, limit))
-
+        limit = max(1, min(100, int(request.GET.get("limit", 10))))
     except ValueError:
         limit = 10
 
-    if LOG_MODE == "structured":
-        logger.info(
-            "get_messages_request",
-            {
-                "extra": {
-                    "page": page,
-                    "limit": limit
-                }
-            }
-        )
+    if LOG_MODE == "structured" or LOG_MODE == "kafka":
+        req_log.info("get messages request", {"req_id": req_id, "extra": {"page": page, "limit": limit}})
 
     offset = (page - 1) * limit
-
-    t_param_done = time.perf_counter()
 
     try:
         with get_db_cursor() as cur:
             cur.execute(
-                """
-                SELECT *
-                FROM chat_message
-                ORDER BY created_at DESC
-                LIMIT %s OFFSET %s
-                """,
+                "SELECT * FROM chat_message ORDER BY created_at DESC LIMIT %s OFFSET %s",
                 (limit, offset)
             )
-
             messages = cur.fetchall()
 
         for msg in messages:
             if msg.get("created_at"):
                 msg["created_at"] = msg["created_at"].isoformat()
-
             if msg.get("updated_at"):
                 msg["updated_at"] = msg["updated_at"].isoformat()
 
-        t_db_done = time.perf_counter()
-
-        p_params = (t_param_done - t_start) * 1000
-        p_db = (t_db_done - t_param_done) * 1000
-        p_total = (time.perf_counter() - t_start) * 1000
-
-        logger.info(
-            "django_perf_get_all",
-            {
-                "extra": {
-                    "perf_type": "DJANGO_PERF_GET_ALL",
-                    "mode": LOG_MODE.upper(),
-                    "parse_param_ms": round(p_params, 3),
-                    "db_query_ms": round(p_db, 3),
-                    "total_ms": round(p_total, 3),
-                    "page": page,
-                    "limit": limit,
-                }
-            }
-        )
+        if LOG_MODE == "kafka":
+            req_log.done()
 
         return JsonResponse({
             "success": True,
-            "pagination": {
-                "page": page,
-                "limit": limit
-            },
+            "pagination": {"page": page, "limit": limit},
             "data": messages
         })
 
     except Exception as e:
-        if LOG_MODE in ("structured", "selective"):
-            logger.error(
-                "get_messages_error",
-                {
-                    "extra": {
-                        "error": str(e)
-                    }
-                }
-            )
+        if LOG_MODE in ("structured", "selective", "kafka"):
+            req_log.error("get messages error", {"req_id": req_id, "extra": {"error": str(e)}})
 
-        return JsonResponse(
-            {
-                "success": False,
-                "error": str(e)
-            },
-            status=500
-        )
+        return JsonResponse({"success": False, "error": str(e)}, status=500)
 
 
-def get_messages_by_room(request, room_origin_id):
-    t_start = time.perf_counter()
+def get_messages_by_room(request: HttpRequest, room_origin_id: str):
+    req_id = get_req_id(request)
+    req_log = create_request_logger("django-service", req_id) if LOG_MODE == "kafka" else logger
 
-    if LOG_MODE == "structured":
-        logger.info(
-            "get_messages_by_room_request",
-            {
-                "extra": {
-                    "room_origin_id": room_origin_id
-                }
-            }
-        )
+    if LOG_MODE == "structured" or LOG_MODE == "kafka":
+        req_log.info("get messages by room request", {"req_id": req_id, "extra": {"room_origin_id": room_origin_id}})
 
     try:
-        page = max(
-            1,
-            int(request.GET.get("page", 1))
-        )
-
+        page = max(1, int(request.GET.get("page", 1)))
     except ValueError:
         page = 1
 
     try:
-        limit = int(request.GET.get("limit", 10))
-        limit = max(1, min(100, limit))
-
+        limit = max(1, min(100, int(request.GET.get("limit", 10))))
     except ValueError:
         limit = 10
 
     offset = (page - 1) * limit
 
-    t_param_done = time.perf_counter()
-
     try:
         with get_db_cursor() as cur:
             cur.execute(
-                """
-                SELECT *
-                FROM chat_message
-                WHERE room_origin_id = %s
-                ORDER BY created_at DESC
-                LIMIT %s OFFSET %s
-                """,
+                "SELECT * FROM chat_message WHERE room_origin_id = %s ORDER BY created_at DESC LIMIT %s OFFSET %s",
                 (room_origin_id, limit, offset)
             )
-
             messages = cur.fetchall()
 
-        p_params = (t_param_done - t_start) * 1000
-        p_db = (time.perf_counter() - t_param_done) * 1000
-
         if not messages:
-            if LOG_MODE in ("structured", "selective"):
-                logger.warn(
-                    "get_messages_by_room_not_found",
-                    {
-                        "extra": {
-                            "room_origin_id": room_origin_id
-                        }
-                    }
-                )
-
-            p_total = (
-                time.perf_counter() - t_start
-            ) * 1000
-
-            logger.info(
-                "django_perf_by_room_404",
-                {
-                    "extra": {
-                        "perf_type": "DJANGO_PERF_BY_ROOM_404",
-                        "mode": LOG_MODE.upper(),
-                        "room_id": room_origin_id,
-                        "parse_param_ms": round(p_params, 3),
-                        "db_query_ms": round(p_db, 3),
-                        "total_ms": round(p_total, 3),
-                    }
-                }
-            )
+            if LOG_MODE in ("structured", "selective", "kafka"):
+                req_log.warn("room not found", {"req_id": req_id, "extra": {"room_origin_id": room_origin_id}})
 
             return JsonResponse(
-                {
-                    "success": False,
-                    "error": f"No messages found for room {room_origin_id}"
-                },
+                {"success": False, "error": f"No messages found for room {room_origin_id}"},
                 status=404
             )
 
         for message in messages:
             if message.get("created_at"):
                 message["created_at"] = message["created_at"].isoformat()
-
             if message.get("updated_at"):
                 message["updated_at"] = message["updated_at"].isoformat()
 
-        t_db_done = time.perf_counter()
-
-        p_db = (t_db_done - t_param_done) * 1000
-        p_total = (time.perf_counter() - t_start) * 1000
-
-        logger.info(
-            "django_perf_by_room_200",
-            {
-                "extra": {
-                    "perf_type": "DJANGO_PERF_BY_ROOM_200",
-                    "mode": LOG_MODE.upper(),
-                    "room_id": room_origin_id,
-                    "parse_param_ms": round(p_params, 3),
-                    "db_query_ms": round(p_db, 3),
-                    "total_ms": round(p_total, 3),
-                    "page": page,
-                    "limit": limit,
-                }
-            }
-        )
+        if LOG_MODE == "kafka":
+            req_log.done()
 
         return JsonResponse({
             "success": True,
-            "pagination": {
-                "page": page,
-                "limit": limit
-            },
+            "pagination": {"page": page, "limit": limit},
             "data": messages
         })
 
     except Exception as e:
-        if LOG_MODE in ("structured", "selective"):
-            logger.error(
-                "get_messages_by_room_error",
-                {
-                    "extra": {
-                        "room_origin_id": room_origin_id,
-                        "error": str(e)
-                    }
-                }
-            )
+        if LOG_MODE in ("structured", "selective", "kafka"):
+            req_log.error("get messages by room error", {"req_id": req_id, "extra": {"room_origin_id": room_origin_id, "error": str(e)}})
 
-        return JsonResponse(
-            {
-                "success": False,
-                "error": str(e)
-            },
-            status=500
-        )
-
+        return JsonResponse({"success": False, "error": str(e)}, status=500)

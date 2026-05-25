@@ -6,6 +6,7 @@ WORKDIR /app
 
 COPY service/fiber-service/go.mod service/fiber-service/go.sum ./
 COPY shared/logger/go /shared/logger/go
+
 RUN go mod download
 
 COPY service/fiber-service/main.go ./
