@@ -30,8 +30,6 @@ if (!fs.existsSync(LOGS_DIRECTORY)) {
 
 const logStream = fs.createWriteStream(COMBINED_LOG_PATH, { flags: "a" });
 
-
-
 const _pino = pino(
   {
     base: undefined,
@@ -50,21 +48,26 @@ const kafka = new Kafka({
 });
 const producer = kafka.producer();
 let producerConnected = false;
+let connectingPromise: Promise<void> | null = null;
 
 async function connectProducer() {
-  if (!producerConnected) {
-    await producer.connect();
+  if (producerConnected) return;
+  if (!connectingPromise) {
+    connectingPromise = (async () => {
+      await producer.connect();
 
-    const admin = kafka.admin();
-    await admin.connect();
-    await admin.createTopics({
-      topics: [{ topic: "req-logs", numPartitions: 1, replicationFactor: 1 }],
-      waitForLeaders: true,
-    });
-    await admin.disconnect();
+      const admin = kafka.admin();
+      await admin.connect();
+      await admin.createTopics({
+        topics: [{ topic: "req-logs", numPartitions: 1, replicationFactor: 1 }],
+        waitForLeaders: true,
+      });
+      await admin.disconnect();
 
-    producerConnected = true;
+      producerConnected = true;
+    })();
   }
+  await connectingPromise;
 }
 
 async function flushToKafka(entries: LogEntry[]) {
@@ -75,28 +78,9 @@ async function flushToKafka(entries: LogEntry[]) {
       messages: [{ value: JSON.stringify(entries) }],
     });
   } catch (err) {
+    // fallback: ghi ra file nếu kafka fail
+    entries.forEach(e => _pino.error(e));
     process.stderr.write(`[kafka-flush-error] ${JSON.stringify(err)}\n`);
-  }
-}
-
-const BUFFER_SIZE = 64;
-
-class RingBuffer {
-  private buffer: LogEntry[] = [];
-
-  push(entry: LogEntry) {
-    if (this.buffer.length >= BUFFER_SIZE) {
-      this.buffer.shift();
-    }
-    this.buffer.push(entry);
-  }
-
-  flush(): LogEntry[] {
-    return [...this.buffer];
-  }
-
-  clear() {
-    this.buffer = [];
   }
 }
 
@@ -145,32 +129,21 @@ function createLogger(service: string) {
 }
 
 function createRequestLogger(service: string, reqId: string) {
-  const ring = new RingBuffer();
-
   return {
     debug(msg: string, ctx: LogContext = {}) {
-      ring.push(buildEntry(service, "debug", msg, { ...ctx, req_id: reqId }));
+      flushToKafka([buildEntry(service, "debug", msg, { ...ctx, req_id: reqId })]);
     },
     info(msg: string, ctx: LogContext = {}) {
-      ring.push(buildEntry(service, "info", msg, { ...ctx, req_id: reqId }));
+      flushToKafka([buildEntry(service, "info", msg, { ...ctx, req_id: reqId })]);
     },
     warn(msg: string, ctx: LogContext = {}) {
-      ring.push(buildEntry(service, "warn", msg, { ...ctx, req_id: reqId }));
-      flushToKafka(ring.flush());
-      ring.clear();
+      flushToKafka([buildEntry(service, "warn", msg, { ...ctx, req_id: reqId })]);
     },
     error(msg: string, ctx: LogContext = {}) {
-      ring.push(buildEntry(service, "error", msg, { ...ctx, req_id: reqId }));
-      flushToKafka(ring.flush());
-      ring.clear();
+      flushToKafka([buildEntry(service, "error", msg, { ...ctx, req_id: reqId })]);
     },
     fatal(msg: string, ctx: LogContext = {}) {
-      ring.push(buildEntry(service, "fatal", msg, { ...ctx, req_id: reqId }));
-      flushToKafka(ring.flush());
-      ring.clear();
-    },
-    done() {
-      ring.clear();
+      flushToKafka([buildEntry(service, "fatal", msg, { ...ctx, req_id: reqId })]);
     },
   };
 }

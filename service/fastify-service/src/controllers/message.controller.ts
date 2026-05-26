@@ -24,7 +24,6 @@ export const getMessages = async (
   reply: FastifyReply,
 ) => {
   const reqId = req.headers["x-request-id"] as string;
-  const tStart = performance.now();
 
   const reqLog = LOG_MODE === "kafka"
     ? createRequestLogger("fastify-service", reqId)
@@ -45,8 +44,6 @@ export const getMessages = async (
       LIMIT ${limit} OFFSET ${offset}
     `;
 
-    if (LOG_MODE === "kafka") reqLog.done();
-
     return { success: true, pagination: { page, limit }, data: rows };
   } catch (err: any) {
     if (LOG_MODE === "structured" || LOG_MODE === "selective" || LOG_MODE === "kafka") {
@@ -65,7 +62,6 @@ export const getMessagesByRoom = async (
   reply: FastifyReply,
 ) => {
   const reqId = req.headers["x-request-id"] as string;
-  const tStart = performance.now();
   const { room_origin_id } = req.params;
 
   const reqLog = LOG_MODE === "kafka"
@@ -100,8 +96,6 @@ export const getMessagesByRoom = async (
       reply.header("connection", "keep-alive").status(404);
       return { success: false, error: `No messages found for room ${room_origin_id}` };
     }
-
-    if (LOG_MODE === "kafka") reqLog.done();
 
     return { success: true, pagination: { page, limit }, data: rows };
   } catch (err: any) {

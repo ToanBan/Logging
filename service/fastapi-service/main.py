@@ -1,6 +1,5 @@
 import os
 import uuid
-import time
 import contextlib
 
 import psycopg2
@@ -60,8 +59,7 @@ def startup_event():
             cur.execute("SELECT 1")
             cur.fetchone()
 
-        if LOG_MODE != "none":
-            logger.info("database connection successful")
+      
 
     except Exception as e:
         logger.error("database connection failed", {"extra": {"error": str(e)}})
@@ -85,11 +83,10 @@ def get_messages(
     req_id = request.state.req_id
     req_log = create_request_logger("fastapi-service", req_id) if LOG_MODE == "kafka" else logger
 
-    if LOG_MODE == "structured" or LOG_MODE == "kafka":
+    if LOG_MODE in ("structured", "kafka"):
         req_log.info("get messages request", {"req_id": req_id, "extra": {"page": page, "limit": limit}})
 
     offset = (page - 1) * limit
-    t_start = time.perf_counter()
 
     try:
         with get_db_cursor() as cur:
@@ -104,9 +101,6 @@ def get_messages(
                 msg["created_at"] = msg["created_at"].isoformat()
             if msg.get("updated_at"):
                 msg["updated_at"] = msg["updated_at"].isoformat()
-
-        if LOG_MODE == "kafka":
-            req_log.done()
 
         return {"success": True, "pagination": {"page": page, "limit": limit}, "data": messages}
 
@@ -130,7 +124,7 @@ def get_messages_by_room(
     req_id = request.state.req_id
     req_log = create_request_logger("fastapi-service", req_id) if LOG_MODE == "kafka" else logger
 
-    if LOG_MODE == "structured" or LOG_MODE == "kafka":
+    if LOG_MODE in ("structured", "kafka"):
         req_log.info("get messages by room request", {"req_id": req_id, "extra": {"room_origin_id": room_origin_id}})
 
     offset = (page - 1) * limit
@@ -157,9 +151,6 @@ def get_messages_by_room(
                 message["created_at"] = message["created_at"].isoformat()
             if message.get("updated_at"):
                 message["updated_at"] = message["updated_at"].isoformat()
-
-        if LOG_MODE == "kafka":
-            req_log.done()
 
         return {"success": True, "pagination": {"page": page, "limit": limit}, "data": messages}
 

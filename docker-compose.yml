@@ -84,7 +84,7 @@ services:
         condition: service_healthy
     volumes:
       - ./shared/logger/logs:/shared/logger/logs
-      
+
   fastapi-service:
     build:
       context: .
@@ -98,6 +98,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    volumes:
+      - ./shared/logger/logs:/shared/logger/logs
 
   django-service:
     build:
@@ -112,6 +114,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    volumes:
+      - ./shared/logger/logs:/shared/logger/logs
 
   kafka:
     image: apache/kafka:4.2.0

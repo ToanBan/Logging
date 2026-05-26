@@ -64,10 +64,3 @@ const app = new Elysia()
 
   .listen(Number(process.env.PORT) || 3002);
 
-if (LOG_MODE !== "none") {
-  log.info(
-    `server running on port ${
-      Number(process.env.PORT) || 3002
-    }`,
-  );
-}

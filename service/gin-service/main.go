@@ -83,29 +83,22 @@ func main() {
 
 	r.Use(gin.Recovery())
 
-	// request id middleware
 	r.Use(func(c *gin.Context) {
-
 		reqID := c.GetHeader("x-request-id")
-
 		if reqID == "" {
 			reqID = uuid.New().String()
 		}
-
 		c.Header("x-request-id", reqID)
 		c.Set("req_id", reqID)
-
 		c.Next()
 	})
 
 	r.GET("/health", func(c *gin.Context) {
-
 		if logMode == "structured" {
 			log.Info("health check", logger.LogContext{
 				ReqID: getReqID(c),
 			})
 		}
-
 		c.JSON(200, gin.H{
 			"ok":      true,
 			"service": "gin-service",
@@ -116,7 +109,6 @@ func main() {
 	r.GET("/messages/room/:room_origin_id", getMessagesByRoom)
 
 	port := os.Getenv("PORT")
-
 	if port == "" {
 		port = "3003"
 	}
@@ -133,23 +125,18 @@ func main() {
 // =====================
 
 func getReqID(c *gin.Context) string {
-
 	if val, exists := c.Get("req_id"); exists {
-
 		if id, ok := val.(string); ok {
 			return id
 		}
 	}
-
 	return ""
 }
 
 func getReqLog(reqID string) ReqLogger {
-
 	if logMode == "kafka" {
 		return logger.NewRequestLogger("gin-service", reqID)
 	}
-
 	return log
 }
 
@@ -158,17 +145,12 @@ func getReqLog(reqID string) ReqLogger {
 // =====================
 
 func buildColumnMeta(rows pgx.Rows) []ColumnMeta {
-
 	fieldDescriptions := rows.FieldDescriptions()
-
 	metas := make([]ColumnMeta, len(fieldDescriptions))
 
 	for i, fd := range fieldDescriptions {
-
 		name := fd.Name
-
 		_, isJSON := jsonColumns[name]
-
 		metas[i] = ColumnMeta{
 			Name: name,
 			IsID: name == "id" ||
@@ -181,18 +163,11 @@ func buildColumnMeta(rows pgx.Rows) []ColumnMeta {
 	return metas
 }
 
-func scanRowsToMaps(
-	rows pgx.Rows,
-	metas []ColumnMeta,
-	capacity int,
-) ([]map[string]any, error) {
-
+func scanRowsToMaps(rows pgx.Rows, metas []ColumnMeta, capacity int) ([]map[string]any, error) {
 	results := make([]map[string]any, 0, capacity)
 
 	for rows.Next() {
-
 		values, err := rows.Values()
-
 		if err != nil {
 			return nil, err
 		}
@@ -200,7 +175,6 @@ func scanRowsToMaps(
 		rowMap := make(map[string]any, len(metas))
 
 		for i, meta := range metas {
-
 			val := values[i]
 
 			if val == nil {
@@ -209,44 +183,31 @@ func scanRowsToMaps(
 			}
 
 			if meta.IsID {
-
 				switch v := val.(type) {
-
 				case string:
 					rowMap[meta.Name] = v
-
 				case []byte:
 					rowMap[meta.Name] = string(v)
-
 				default:
 					rowMap[meta.Name] = fmt.Sprint(v)
 				}
-
 				continue
 			}
 
 			switch v := val.(type) {
-
 			case time.Time:
-				rowMap[meta.Name] =
-					v.UTC().Format("2006-01-02T15:04:05.000Z")
-
+				rowMap[meta.Name] = v.UTC().Format("2006-01-02T15:04:05.000Z")
 			case []byte:
-
 				if meta.IsJSON {
-
 					var jsonVal any
-
 					if err := sonic.Unmarshal(v, &jsonVal); err == nil {
 						rowMap[meta.Name] = jsonVal
 					} else {
 						rowMap[meta.Name] = string(v)
 					}
-
 				} else {
 					rowMap[meta.Name] = string(v)
 				}
-
 			default:
 				rowMap[meta.Name] = v
 			}
@@ -263,7 +224,6 @@ func scanRowsToMaps(
 // =====================
 
 func getMessages(c *gin.Context) {
-
 	reqID := getReqID(c)
 	reqLog := getReqLog(reqID)
 
@@ -271,7 +231,6 @@ func getMessages(c *gin.Context) {
 	limitStr := c.DefaultQuery("limit", "10")
 
 	if logMode == "structured" || logMode == "kafka" {
-
 		reqLog.Info("get messages request", logger.LogContext{
 			ReqID: reqID,
 			Extra: map[string]any{
@@ -282,17 +241,14 @@ func getMessages(c *gin.Context) {
 	}
 
 	page, err := strconv.Atoi(pageStr)
-
 	if err != nil || page < 1 {
 		page = 1
 	}
 
 	limit, err := strconv.Atoi(limitStr)
-
 	if err != nil || limit < 1 {
 		limit = 10
 	}
-
 	if limit > 100 {
 		limit = 100
 	}
@@ -301,92 +257,50 @@ func getMessages(c *gin.Context) {
 
 	rows, err := dbPool.Query(
 		c.Request.Context(),
-		`
-		SELECT *
-		FROM chat_message
-		ORDER BY created_at DESC
-		LIMIT $1 OFFSET $2
-		`,
-		limit,
-		offset,
+		`SELECT * FROM chat_message ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
+		limit, offset,
 	)
-
 	if err != nil {
-
-		if logMode == "structured" ||
-			logMode == "selective" ||
-			logMode == "kafka" {
-
+		if logMode == "structured" || logMode == "selective" || logMode == "kafka" {
 			reqLog.Error("get messages error", logger.LogContext{
 				ReqID: reqID,
-				Extra: map[string]any{
-					"error": err.Error(),
-				},
+				Extra: map[string]any{"error": err.Error()},
 			})
 		}
-
-		c.JSON(500, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
-
+		c.JSON(500, gin.H{"success": false, "error": err.Error()})
 		return
 	}
-
 	defer rows.Close()
 
 	metas := buildColumnMeta(rows)
-
 	messages, err := scanRowsToMaps(rows, metas, limit)
-
 	if err != nil {
-
-		if logMode == "structured" ||
-			logMode == "selective" ||
-			logMode == "kafka" {
-
+		if logMode == "structured" || logMode == "selective" || logMode == "kafka" {
 			reqLog.Error("get messages scan error", logger.LogContext{
 				ReqID: reqID,
-				Extra: map[string]any{
-					"error": err.Error(),
-				},
+				Extra: map[string]any{"error": err.Error()},
 			})
 		}
-
-		c.JSON(500, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
-
+		c.JSON(500, gin.H{"success": false, "error": err.Error()})
 		return
 	}
 
-	if logMode == "kafka" {
-		reqLog.Done()
-	}
-
 	c.JSON(200, gin.H{
-		"success": true,
-		"pagination": gin.H{
-			"page":  page,
-			"limit": limit,
-		},
-		"data": messages,
+		"success":    true,
+		"pagination": gin.H{"page": page, "limit": limit},
+		"data":       messages,
 	})
 }
 
 func getMessagesByRoom(c *gin.Context) {
-
 	reqID := getReqID(c)
 	reqLog := getReqLog(reqID)
 
 	roomOriginID := c.Param("room_origin_id")
-
 	pageStr := c.DefaultQuery("page", "1")
 	limitStr := c.DefaultQuery("limit", "10")
 
 	if logMode == "structured" || logMode == "kafka" {
-
 		reqLog.Info("get messages by room request", logger.LogContext{
 			ReqID: reqID,
 			Extra: map[string]any{
@@ -398,17 +312,14 @@ func getMessagesByRoom(c *gin.Context) {
 	}
 
 	page, err := strconv.Atoi(pageStr)
-
 	if err != nil || page < 1 {
 		page = 1
 	}
 
 	limit, err := strconv.Atoi(limitStr)
-
 	if err != nil || limit < 1 {
 		limit = 10
 	}
-
 	if limit > 100 {
 		limit = 100
 	}
@@ -417,24 +328,11 @@ func getMessagesByRoom(c *gin.Context) {
 
 	rows, err := dbPool.Query(
 		c.Request.Context(),
-		`
-		SELECT *
-		FROM chat_message
-		WHERE room_origin_id = $1
-		ORDER BY created_at DESC
-		LIMIT $2 OFFSET $3
-		`,
-		roomOriginID,
-		limit,
-		offset,
+		`SELECT * FROM chat_message WHERE room_origin_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+		roomOriginID, limit, offset,
 	)
-
 	if err != nil {
-
-		if logMode == "structured" ||
-			logMode == "selective" ||
-			logMode == "kafka" {
-
+		if logMode == "structured" || logMode == "selective" || logMode == "kafka" {
 			reqLog.Error("get messages by room error", logger.LogContext{
 				ReqID: reqID,
 				Extra: map[string]any{
@@ -443,27 +341,15 @@ func getMessagesByRoom(c *gin.Context) {
 				},
 			})
 		}
-
-		c.JSON(500, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
-
+		c.JSON(500, gin.H{"success": false, "error": err.Error()})
 		return
 	}
-
 	defer rows.Close()
 
 	metas := buildColumnMeta(rows)
-
 	messages, err := scanRowsToMaps(rows, metas, limit)
-
 	if err != nil {
-
-		if logMode == "structured" ||
-			logMode == "selective" ||
-			logMode == "kafka" {
-
+		if logMode == "structured" || logMode == "selective" || logMode == "kafka" {
 			reqLog.Error("get messages by room scan error", logger.LogContext{
 				ReqID: reqID,
 				Extra: map[string]any{
@@ -472,50 +358,27 @@ func getMessagesByRoom(c *gin.Context) {
 				},
 			})
 		}
-
-		c.JSON(500, gin.H{
-			"success": false,
-			"error":   err.Error(),
-		})
-
+		c.JSON(500, gin.H{"success": false, "error": err.Error()})
 		return
 	}
 
 	if len(messages) == 0 {
-
-		if logMode == "structured" ||
-			logMode == "selective" ||
-			logMode == "kafka" {
-
+		if logMode == "structured" || logMode == "selective" || logMode == "kafka" {
 			reqLog.Warn("room not found", logger.LogContext{
 				ReqID: reqID,
-				Extra: map[string]any{
-					"room_origin_id": roomOriginID,
-				},
+				Extra: map[string]any{"room_origin_id": roomOriginID},
 			})
 		}
-
 		c.JSON(404, gin.H{
 			"success": false,
-			"error": fmt.Sprintf(
-				"No messages found for room %s",
-				roomOriginID,
-			),
+			"error":   fmt.Sprintf("No messages found for room %s", roomOriginID),
 		})
-
 		return
 	}
 
-	if logMode == "kafka" {
-		reqLog.Done()
-	}
-
 	c.JSON(200, gin.H{
-		"success": true,
-		"pagination": gin.H{
-			"page":  page,
-			"limit": limit,
-		},
-		"data": messages,
+		"success":    true,
+		"pagination": gin.H{"page": page, "limit": limit},
+		"data":       messages,
 	})
 }

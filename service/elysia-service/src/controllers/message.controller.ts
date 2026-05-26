@@ -6,7 +6,6 @@ const log = createLogger("elysia-service");
 
 export const getMessages = async ({ query, store, set }: any) => {
   const reqId = store.reqId as string;
-  const tStart = performance.now();
 
   const reqLog = LOG_MODE === "kafka"
     ? createRequestLogger("elysia-service", reqId)
@@ -27,8 +26,6 @@ export const getMessages = async ({ query, store, set }: any) => {
       LIMIT ${limit} OFFSET ${offset}
     `;
 
-    if (LOG_MODE === "kafka") reqLog.done();
-
     return { success: true, pagination: { page, limit }, data: rows };
   } catch (err: any) {
     if (LOG_MODE === "structured" || LOG_MODE === "selective" || LOG_MODE === "kafka") {
@@ -41,7 +38,6 @@ export const getMessages = async ({ query, store, set }: any) => {
 
 export const getMessagesByRoom = async ({ params, query, store, set }: any) => {
   const reqId = store.reqId as string;
-  const tStart = performance.now();
   const { room_origin_id } = params;
 
   const reqLog = LOG_MODE === "kafka"
@@ -71,11 +67,8 @@ export const getMessagesByRoom = async ({ params, query, store, set }: any) => {
 
       set.status = 404;
       set.headers = { connection: "keep-alive" };
-
       return { success: false, error: `No messages found for room ${room_origin_id}` };
     }
-
-    if (LOG_MODE === "kafka") reqLog.done();
 
     return { success: true, pagination: { page, limit }, data: rows };
   } catch (err: any) {

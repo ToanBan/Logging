@@ -4,15 +4,12 @@ import structlog
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-benchmark-secret-key-123456789'
 
-# SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
 
 ALLOWED_HOSTS = ['*']
 
-# Application definition
 INSTALLED_APPS = []
 
 MIDDLEWARE = [
@@ -23,7 +20,6 @@ ROOT_URLCONF = 'core.urls'
 
 WSGI_APPLICATION = 'core.wsgi.application'
 
-# Dummy database since we are bypassing ORM for ultra-high performance connection pooling
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
@@ -31,7 +27,6 @@ DATABASES = {
     }
 }
 
-# Structlog structured logging setup - Unified configuration
 LOG_MODE = os.getenv("LOG_MODE", "none").strip().lower()
 import logging
 
@@ -42,7 +37,6 @@ processors = [
 ]
 
 if LOG_MODE == "none":
-    # Disable logging completely
     logging.disable(logging.CRITICAL)
     structlog.configure(
         processors=[structlog.processors.JSONRenderer()],
@@ -54,7 +48,6 @@ if LOG_MODE == "none":
         'disable_existing_loggers': True,
     }
 elif LOG_MODE == "selective":
-    # Only show warnings and errors - suppress info logs and http access logs
     structlog.configure(
         processors=processors + [structlog.processors.JSONRenderer()],
         context_class=dict,
@@ -95,7 +88,6 @@ elif LOG_MODE == "selective":
         },
     }
 else:
-    # structured mode - show all logs
     structlog.configure(
         processors=processors + [structlog.processors.JSONRenderer()],
         context_class=dict,
@@ -105,4 +97,21 @@ else:
     LOGGING = {
         'version': 1,
         'disable_existing_loggers': False,
+        'handlers': {
+            'null': {
+                'class': 'logging.NullHandler',
+            },
+        },
+        'loggers': {
+            'django.server': {
+                'handlers': ['null'],
+                'level': 'CRITICAL',
+                'propagate': False,
+            },
+            'django.request': {
+                'handlers': ['null'],
+                'level': 'CRITICAL',
+                'propagate': False,
+            },
+        },
     }

@@ -1,7 +1,6 @@
 import os
 import uuid
 import contextlib
-import time
 
 from django.http import JsonResponse, HttpRequest
 
@@ -42,9 +41,6 @@ try:
         cur.execute("SELECT 1")
         cur.fetchone()
 
-    if LOG_MODE != "none":
-        logger.info("database connection successful")
-
 except Exception as e:
     logger.error("database connection failed", {"extra": {"error": str(e)}})
     os._exit(1)
@@ -75,7 +71,7 @@ def get_messages(request: HttpRequest):
     except ValueError:
         limit = 10
 
-    if LOG_MODE == "structured" or LOG_MODE == "kafka":
+    if LOG_MODE in ("structured", "kafka"):
         req_log.info("get messages request", {"req_id": req_id, "extra": {"page": page, "limit": limit}})
 
     offset = (page - 1) * limit
@@ -94,9 +90,6 @@ def get_messages(request: HttpRequest):
             if msg.get("updated_at"):
                 msg["updated_at"] = msg["updated_at"].isoformat()
 
-        if LOG_MODE == "kafka":
-            req_log.done()
-
         return JsonResponse({
             "success": True,
             "pagination": {"page": page, "limit": limit},
@@ -114,7 +107,7 @@ def get_messages_by_room(request: HttpRequest, room_origin_id: str):
     req_id = get_req_id(request)
     req_log = create_request_logger("django-service", req_id) if LOG_MODE == "kafka" else logger
 
-    if LOG_MODE == "structured" or LOG_MODE == "kafka":
+    if LOG_MODE in ("structured", "kafka"):
         req_log.info("get messages by room request", {"req_id": req_id, "extra": {"room_origin_id": room_origin_id}})
 
     try:
@@ -151,9 +144,6 @@ def get_messages_by_room(request: HttpRequest, room_origin_id: str):
                 message["created_at"] = message["created_at"].isoformat()
             if message.get("updated_at"):
                 message["updated_at"] = message["updated_at"].isoformat()
-
-        if LOG_MODE == "kafka":
-            req_log.done()
 
         return JsonResponse({
             "success": True,
